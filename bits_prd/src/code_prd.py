@@ -117,7 +117,6 @@ def compute_baseline(prd_pd: pd.DataFrame, weights_column:str="weight") -> pd.Da
     for _, group in tqdm(prd_pd.groupby("unix_time"), total=len(prd_pd["unix_time"].unique()), desc=tqdm_desc):
 
         result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
-        out_pd_list.append(result_pd)
 
         out_pd_list.append(result_pd)
 
