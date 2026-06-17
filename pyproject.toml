@@ -1,0 +1,25 @@
+[project]
+name = "bits_prd"
+authors = [
+  {name = "Enki Saura", email = "esaura@ikosconsulting.com"},
+]
+maintainers = [
+  {name = "Enki Saura", email = "esaura@ikosconsulting.com"}
+]
+description = "This is an awesome script !"
+dynamic = ["version"]
+dependencies = [
+    "pandas",
+    "numpy",
+    "baguette_in_the_sky",
+    "tqdm"
+]
+requires-python = ">= 3.12"
+
+
+[tool.pytest.ini_options]
+testpaths = ["bits_prd/test"] # Test directory
+python_files = ["test_*.py"] # Test files
+python_classes = ["Test*"] # Test class
+python_functions = ["test_*"] # Test functions
+norecursedirs = [".*", "build", "dist", "venv", "env", "__pycache__", "test_data"] # Not included directories
