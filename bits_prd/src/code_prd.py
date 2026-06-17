@@ -1,5 +1,6 @@
 import bits
 from bits_prd.src import utils
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -114,70 +115,77 @@ def compute_baseline(prd_pd: pd.DataFrame, weights_column:str="weight") -> pd.Da
 
     out_pd_list = []
     for _, group in tqdm(prd_pd.groupby("unix_time"), total=len(prd_pd["unix_time"].unique()), desc=tqdm_desc):
-        # Build measurement matrix
-        Y = group[mode].to_numpy().reshape(-1, 1)
 
-        # Build geometry matrix
-        if mode == "sd":
-            ex = group["steering_vector_x_rx1"].to_numpy()
-            ey = group["steering_vector_y_rx1"].to_numpy()
-            ez = group["steering_vector_z_rx1"].to_numpy()
+        result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
+        out_pd_list.append(result_pd)
 
-            G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose()
-        else:
-            ex = group["delta_steering_vector_x"].to_numpy()
-            ey = group["delta_steering_vector_y"].to_numpy()
-            ez = group["delta_steering_vector_z"].to_numpy()
-
-            G = np.vstack((ex, ey, ez)).transpose()
-
-        # Build weight matrix
-        if weights_column in prd_pd.columns:
-            w = group[weights_column].to_numpy()
-        else:
-            w = np.ones_like(Y)
-        W = np.diag(w.ravel())
-
-        # Compute baseline
-        result = utils.wls(Y, G, W)
-
-        # Save the result
-        out_group = group.copy()
-        if result is not None:
-            estimate, covariance = result
-            residuals = Y - G @ estimate
-
-            out_group["baseline_x"] = float(estimate[0][0])
-            out_group["baseline_y"] = float(estimate[1][0])
-            out_group["baseline_z"] = float(estimate[2][0])
-            if mode == "sd":
-                out_group["baseline_b"] = float(estimate[3][0])
-            out_group["baseline"] = float(np.linalg.norm(estimate[:3]))
-            out_group["covariance_x"] = float(covariance[0][0])
-            out_group["covariance_y"] = float(covariance[1][1])
-            out_group["covariance_z"] = float(covariance[2][2])
-            if mode == "sd":
-                out_group["covariance_b"] = float(covariance[3][3])
-            out_group["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
-
-            out_group["residuals"] = residuals
-            out_group["std"] = float(np.std(residuals.ravel()))
-        else:
-            out_group["baseline_x"] = None
-            out_group["baseline_y"] = None
-            out_group["baseline_z"] = None
-            if mode == "sd":
-                out_group["baseline_b"] = None
-            out_group["baseline"] = None
-            out_group["covariance_x"] = None
-            out_group["covariance_y"] = None
-            out_group["covariance_z"] = None
-            if mode == "sd":
-                out_group["covariance_b"] = None
-
-            out_group["residuals"] = None
-            out_group["std"] = None
-
-        out_pd_list.append(out_group)
+        out_pd_list.append(result_pd)
 
     return pd.concat(out_pd_list, ignore_index=True)
+
+def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") -> pd.DataFrame:
+    # Build measurement matrix
+    Y = group[mode].to_numpy().reshape(-1, 1)
+
+    # Build geometry matrix
+    if mode == "sd":
+        ex = group["steering_vector_x_rx1"].to_numpy()
+        ey = group["steering_vector_y_rx1"].to_numpy()
+        ez = group["steering_vector_z_rx1"].to_numpy()
+
+        G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose()
+    else:
+        ex = group["delta_steering_vector_x"].to_numpy()
+        ey = group["delta_steering_vector_y"].to_numpy()
+        ez = group["delta_steering_vector_z"].to_numpy()
+
+        G = np.vstack((ex, ey, ez)).transpose()
+
+    # Build weight matrix
+    if weights_column in group.columns:
+        w = group[weights_column].to_numpy()
+    else:
+        w = np.ones_like(Y)
+    W = np.diag(w.ravel())
+
+    # Compute baseline
+    result = utils.wls(Y, G, W)
+
+    # Save the result
+    out_group = group.copy()
+    if result is not None:
+        estimate, covariance = result
+        residuals = Y - G @ estimate
+
+        out_group["baseline_x"] = float(estimate[0][0])
+        out_group["baseline_y"] = float(estimate[1][0])
+        out_group["baseline_z"] = float(estimate[2][0])
+        if mode == "sd":
+            out_group["baseline_b"] = float(estimate[3][0])
+        out_group["baseline"] = float(np.linalg.norm(estimate[:3]))
+        out_group["covariance_x"] = float(covariance[0][0])
+        out_group["covariance_y"] = float(covariance[1][1])
+        out_group["covariance_z"] = float(covariance[2][2])
+        if mode == "sd":
+            out_group["covariance_b"] = float(covariance[3][3])
+        out_group["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
+
+        out_group["residuals"] = residuals
+        out_group["std"] = float(np.std(residuals.ravel()))
+    else:
+        out_group["baseline_x"] = None
+        out_group["baseline_y"] = None
+        out_group["baseline_z"] = None
+        if mode == "sd":
+            out_group["baseline_b"] = None
+        out_group["baseline"] = None
+        out_group["covariance_x"] = None
+        out_group["covariance_y"] = None
+        out_group["covariance_z"] = None
+        if mode == "sd":
+            out_group["covariance_b"] = None
+
+        out_group["residuals"] = None
+        out_group["std"] = None
+
+    return out_group
