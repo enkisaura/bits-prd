@@ -1,5 +1,5 @@
 import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
-from bits_prd.src import utils
+#from bits_prd.src import utils
 from typing import Literal
 
 import numpy as np
@@ -8,14 +8,14 @@ from tqdm import tqdm
 
 
 def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, dt_tolerance=0.5, compute_dd=True,
-            pivot_full_sv_id:str|None=None) -> pd.DataFrame:
+            pivot_sv_id:str|None=None) -> pd.DataFrame:
     """
     Computes single and double differences
-    :param rx1_obs_pd: need at least pr_m, steering vectors, unix_time, full_sv_id
-    :param rx2_obs_pd: need at least pr_m, steering vectors, unix_time, full_sv_id
+    :param rx1_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
+    :param rx2_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
     :param dt_tolerance:
     :param compute_dd: set to True to compute SD + DD, False for SD only
-    :param pivot_full_sv_id: name of the pivot SV
+    :param pivot_sv_id: name of the pivot SV
     :return:
     """
     if "unix_time" not in rx1_obs_pd.columns:
@@ -25,8 +25,8 @@ def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, dt_tolerance=0.5
     if compute_dd:
         out_pd = get_double_difference_no_pivot(out_pd)
 
-        if pivot_full_sv_id is not None:
-            out_pd = out_pd[(out_pd["full_sv_id1"==pivot_full_sv_id]) | (out_pd["full_sv_id2"==pivot_full_sv_id])] #TODO
+        if pivot_sv_id is not None:
+            out_pd = out_pd[(out_pd["sv_id1"==pivot_sv_id]) | (out_pd["sv_id2"==pivot_sv_id])] #TODO
 
     return out_pd
 
@@ -40,7 +40,7 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
     out_pd = pd.merge_asof(
         rx1_obs_pd, rx2_obs_pd,
         on="unix_time",
-        by="full_sv_id",
+        by="sv_id",
         tolerance=dt_tolerance,
         direction="nearest",
         suffixes=("_rx1", "_rx2")
@@ -51,7 +51,7 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
 
     # Clean up
     out_pd.dropna(subset=["sd"], inplace=True)
-    out_pd = out_pd.sort_values(by=["unix_time", "full_sv_id"]).reset_index(drop=True)
+    out_pd = out_pd.sort_values(by=["unix_time", "sv_id"]).reset_index(drop=True)
 
     return out_pd
 
@@ -66,8 +66,8 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
         # Find every possible dd combination
         for i in range(group.shape[0] - 1):
             local_dd_pd = group[i:].copy()
-            local_dd_pd["full_sv_id1"] = local_dd_pd["full_sv_id"].iloc[0]
-            local_dd_pd["sv_id1"] = local_dd_pd["sv_id_rx1"].iloc[0]
+            local_dd_pd["sv_id1"] = local_dd_pd["sv_id"].iloc[0]
+            local_dd_pd["prn_id1"] = local_dd_pd["prn_id_rx1"].iloc[0]
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
             local_dd_pd["steering_vector_x_sv1"] = local_dd_pd["steering_vector_x_rx1"].iloc[0]
             local_dd_pd["steering_vector_y_sv1"] = local_dd_pd["steering_vector_y_rx1"].iloc[0]
@@ -85,7 +85,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd = pd.concat(out_pd_list, ignore_index=True)
 
     # Rename sv2 data
-    out_pd.rename(columns={"full_sv_id": "full_sv_id2", "sv_id": "sv_id2", "sd": "sd2",
+    out_pd.rename(columns={"sv_id": "sv_id2", "prn_id": "prn_id2", "sd": "sd2",
                            "steering_vector_x_rx1": "steering_vector_x_sv2",
                            "steering_vector_y_rx1": "steering_vector_y_sv2",
                            "steering_vector_z_rx1": "steering_vector_z_sv2"}, inplace=True)
@@ -98,7 +98,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd["delta_steering_vector_y"] = (out_pd["steering_vector_y_sv1"] - out_pd["steering_vector_y_sv2"])
     out_pd["delta_steering_vector_z"] = (out_pd["steering_vector_z_sv1"] - out_pd["steering_vector_z_sv2"])
 
-    out_pd = out_pd.sort_values(by=["unix_time", "full_sv_id1", "full_sv_id2"]).reset_index(drop=True)  # Clean up
+    out_pd = out_pd.sort_values(by=["unix_time", "sv_id1", "sv_id2"]).reset_index(drop=True)  # Clean up
 
     return out_pd
 

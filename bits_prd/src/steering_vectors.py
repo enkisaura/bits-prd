@@ -10,11 +10,10 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     Need either ephemeris_pd or ephemeris_filepath
 
     "unix_time": secondes
-    "sv_id"
     "gnss_id"
     "x_rx_m", "y_rx_m", "z_rx_m": receiver pos (ECEF meters)
 
-    :param raw_pd: raw measurements containing at least "unix_time", "sv_id" and "gnss_id"
+    :param raw_pd: raw measurements containing at least "unix_time" and "gnss_id"
     :param ephemeris_pd: Dataframe containing ephemeris. Use BITS parser
     :param ephemeris_filepath: Filepath to Rinex nav ephemeris
     :param pos_pd: Position of receiver containing at least "unix_time", "x_rx_m", "y_rx_m", "z_rx_m"
@@ -34,9 +33,6 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
 
     # Compute steering vectors
     out_pd = compute_steering_vector(out_pd)
-
-    # Add a unique SV identifier
-    out_pd["full_sv_id"] = out_pd.apply(lambda row: f"{row["gnss_id"]}{row["sv_id"]}", axis=1)
 
     return out_pd
 
