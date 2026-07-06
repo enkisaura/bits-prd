@@ -1,4 +1,4 @@
-import bits
+import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
 
 import numpy as np
 import pandas as pd
@@ -20,6 +20,13 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     :param pos_pd: Position of receiver containing at least "unix_time", "x_rx_m", "y_rx_m", "z_rx_m"
     :return:
     """
+    if "unix_time" not in raw_pd.columns:
+        raw_pd["unix_time"] = raw_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
+
+    if pos_pd is not None:
+        if "unix_time" not in pos_pd.columns:
+            pos_pd["unix_time"] = pos_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
+
     if pos_pd is None:
         out_pd = slow_sv_pos(raw_pd, ephemeris_pd, ephemeris_filepath) # Also computes approximate position
     else:

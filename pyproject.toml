@@ -9,9 +9,9 @@ maintainers = [
 description = "This is an awesome script !"
 dynamic = ["version"]
 dependencies = [
+    "baguette_in_the_sky", # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
     "pandas",
     "numpy",
-    "baguette_in_the_sky",
     "tqdm",
 ]
 requires-python = ">= 3.12"

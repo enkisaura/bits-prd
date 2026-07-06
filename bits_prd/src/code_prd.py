@@ -1,4 +1,4 @@
-import bits
+import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
 from bits_prd.src import utils
 from typing import Literal
 
@@ -18,6 +18,8 @@ def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, dt_tolerance=0.5
     :param pivot_full_sv_id: name of the pivot SV
     :return:
     """
+    if "unix_time" not in rx1_obs_pd.columns:
+        rx1_obs_pd["unix_time"] = rx1_obs_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
     out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=dt_tolerance)
 
     if compute_dd:
