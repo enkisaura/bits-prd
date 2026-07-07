@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 def compute_geometry_matrix(raw_pd: pd.DataFrame,
-                            ephemeris_pd: pd.DataFrame|None=None, ephemeris_filepath: pd.DataFrame|None=None,
+                            ephemeris_pd: pd.DataFrame|None=None, ephemeris_filepath: str|None=None,
                             pos_pd:pd.DataFrame|None=None) -> pd.DataFrame:
     """
     Need either ephemeris_pd or ephemeris_filepath.
@@ -37,7 +37,7 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     return out_pd
 
 
-def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame, ephemeris_filepath:pd.DataFrame) \
+def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame|None, ephemeris_filepath:str|None) \
         -> pd.DataFrame:
     """
     Computes satellites and receiver positions
@@ -69,7 +69,8 @@ def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame, ephemeris_filep
     return out_pd
 
 
-def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.DataFrame, ephemeris_filepath):
+def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.DataFrame|None,
+                ephemeris_filepath:str|None) -> pd.DataFrame:
     """
     Computes satellites positions
 

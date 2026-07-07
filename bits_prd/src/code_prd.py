@@ -1,25 +1,27 @@
-import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
 from typing import Literal
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
+from bits_prd.src.steering_vectors import compute_geometry_matrix
 
-def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, dt_tolerance=0.5, compute_dd=True,
+
+def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_meas:float=1, compute_dd=True,
             pivot_sv_id:str|None=None) -> pd.DataFrame:
     """
     Computes single and double differences
     :param rx1_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
     :param rx2_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
-    :param dt_tolerance:
+    :param time_between_meas:
     :param compute_dd: set to True to compute SD + DD, False for SD only
     :param pivot_sv_id: name of the pivot SV
     :return:
     """
     if "unix_time" not in rx1_obs_pd.columns:
         rx1_obs_pd["unix_time"] = rx1_obs_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
-    out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=dt_tolerance)
+    out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=time_between_meas/2)
 
     if compute_dd:
         out_pd = get_double_difference_no_pivot(out_pd)
@@ -102,23 +104,49 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     return out_pd
 
 
-def compute_baseline(prd_pd: pd.DataFrame, weights_column:str="weight") -> pd.DataFrame:
-    if "dd" in prd_pd.columns:
+def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
+                     time_between_meas:float = 1, compute_dd:None|bool=None, pivot_sv_id:str | None = None,
+                     ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
+                     pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None) -> pd.DataFrame:
+    # 0 determine mode (SD/DD); Default = DD
+    if "dd" in rx_obs_pd.columns:
         mode = "dd"
-    elif "sd" in prd_pd.columns:
+        compute_dd = True
+    elif "sd" in rx_obs_pd.columns:
+        mode = "sd"
+        compute_dd = False
+    elif compute_dd is False:
         mode = "sd"
     else:
-        raise ValueError("Neither 'dd' or 'sd' columns present, cannot compute baseline with code based pseudorange "
-                         "differencing.")
+        mode = "dd"
+        compute_dd = True
 
+    if rx2_obs_pd is None and ("sd" not in rx_obs_pd.columns or "dd" not in rx_obs_pd.columns):
+        raise ValueError("No pseudorange differences found in Dataframe. Please provide pseudoranges from a second "
+                         "receiver in argument rx2_obs_pd.")
+
+    # 1 Compute steering vectors
+    if "steering_vector_x" not in rx_obs_pd.columns or "steering_vector_x_rx1" not in rx_obs_pd.columns:
+        rx_obs_pd = compute_geometry_matrix(rx_obs_pd, ephemeris_pd=ephemeris_pd,
+                                            ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx1)
+
+    if rx2_obs_pd is not None:
+        if "steering_vector_x" not in rx2_obs_pd.columns:
+            rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
+                                                 ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2)
+
+    # 2 Compute Single/Double differences
+    if rx2_obs_pd is not None:
+        rx_obs_pd = get_prd(rx_obs_pd, rx2_obs_pd, time_between_meas=time_between_meas, compute_dd=compute_dd,
+        pivot_sv_id=pivot_sv_id)
+
+    # 3 Compute baseline
     # Group by timestamp
     tqdm_desc = f"Computing baseline with {mode}"
 
     out_pd_list = []
-    for _, group in tqdm(prd_pd.groupby("unix_time"), total=len(prd_pd["unix_time"].unique()), desc=tqdm_desc):
-
+    for _, group in tqdm(rx_obs_pd.groupby("unix_time"), total=len(rx_obs_pd["unix_time"].unique()), desc=tqdm_desc):
         result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
-
         out_pd_list.append(result_pd)
 
     return pd.concat(out_pd_list, ignore_index=True)
