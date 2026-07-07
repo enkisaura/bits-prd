@@ -7,17 +7,17 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
                             ephemeris_pd: pd.DataFrame|None=None, ephemeris_filepath: pd.DataFrame|None=None,
                             pos_pd:pd.DataFrame|None=None) -> pd.DataFrame:
     """
-    Need either ephemeris_pd or ephemeris_filepath
+    Need either ephemeris_pd or ephemeris_filepath.
 
     "unix_time": secondes
     "gnss_id"
     "x_rx_m", "y_rx_m", "z_rx_m": receiver pos (ECEF meters)
 
-    :param raw_pd: raw measurements containing at least "unix_time" and "gnss_id"
-    :param ephemeris_pd: Dataframe containing ephemeris. Use BITS parser
+    :param raw_pd: BITS raw dataframe
+    :param ephemeris_pd: BITS ephemeris dataframe
     :param ephemeris_filepath: Filepath to Rinex nav ephemeris
-    :param pos_pd: Position of receiver containing at least "unix_time", "x_rx_m", "y_rx_m", "z_rx_m"
-    :return:
+    :param pos_pd: BITS PVT dataframe
+    :return: BITS raw dataframe with geometry matrix
     """
     if "unix_time" not in raw_pd.columns:
         raw_pd["unix_time"] = raw_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())

@@ -1,5 +1,4 @@
 import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
-#from bits_prd.src import utils
 from typing import Literal
 
 import numpy as np
@@ -150,12 +149,15 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
     W = np.diag(w.ravel())
 
     # Compute baseline
-    result = utils.wls(Y, G, W)
+    try:
+        result = bits.spp.weighted_least_square(Y, G, W)
+    except:
+        result = None
 
     # Save the result
     out_group = group.copy()
     if result is not None:
-        estimate, covariance = result
+        estimate, covariance, _ = result
         residuals = Y - G @ estimate
 
         out_group["baseline_x"] = float(estimate[0][0])
