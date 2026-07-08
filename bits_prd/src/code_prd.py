@@ -11,33 +11,49 @@ from bits_prd.src.steering_vectors import compute_geometry_matrix
 def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_meas:float=1, compute_dd=True,
             pivot_sv_id:str|None=None) -> pd.DataFrame:
     """
-    Computes single and double differences
-    :param rx1_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
-    :param rx2_obs_pd: need at least pr_m, steering vectors, unix_time, sv_id
-    :param time_between_meas:
+    Computes single and double differences. This functions merges rx1_obs_pd with rx2_obs_pd and adds pseudorange
+    differences. In the returned dataframe, rx1_obs_pd data is noted "_rx1" and rx2_obs_pd "_rx2".
+
+    :param rx1_obs_pd: BITS raw dataframe with geometry matrix
+    :param rx2_obs_pd: BITS raw dataframe with geometry matrix
+    :param time_between_meas: Maximum allowed time between measurements
     :param compute_dd: set to True to compute SD + DD, False for SD only
-    :param pivot_sv_id: name of the pivot SV
-    :return:
+    :param pivot_sv_id: name of the pivot SV; set to None for no pivot
+    :return: BITS raw dataframe like with sd and/or dd
     """
+    # Add unix_time in seconds for easier sorting. In a futur version of BITS this step will not be required anymore.
     if "unix_time" not in rx1_obs_pd.columns:
         rx1_obs_pd["unix_time"] = rx1_obs_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
+
+    # Compute single differences
     out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=time_between_meas/2)
 
+    # Compute double differences if applicable
     if compute_dd:
         out_pd = get_double_difference_no_pivot(out_pd)
 
+        # Keep only DD with given pivot_sv_id if applicable
         if pivot_sv_id is not None:
-            out_pd = out_pd[(out_pd["sv_id1"==pivot_sv_id]) | (out_pd["sv_id2"==pivot_sv_id])] #TODO
+            out_pd = out_pd[(out_pd["sv_id1"==pivot_sv_id]) | (out_pd["sv_id2"==pivot_sv_id])]
 
     return out_pd
 
 
 def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
                           dt_tolerance: float = 0.5) -> pd.DataFrame:
-    # 1 At each timestamp, merge common sattellites
+    """
+    Computes single difference. In the returned dataframe, rx1_obs_pd data is noted "_rx1" and rx2_obs_pd "_rx2".
+
+    :param rx1_obs_pd: BITS raw dataframe
+    :param rx2_obs_pd: BITS raw dataframe
+    :param dt_tolerance: Maximum time between measurements of rx1 and rx2 to be considered at same timestamp
+    :return: BITS raw dataframe like with sd
+    """
+    # 0 Clean up
     rx1_obs_pd = rx1_obs_pd.sort_values("unix_time")
     rx2_obs_pd = rx2_obs_pd.sort_values("unix_time")
 
+    # 1 Merge common satellites from rx1_obs_pd and rx2_obs_pd
     out_pd = pd.merge_asof(
         rx1_obs_pd, rx2_obs_pd,
         on="unix_time",
@@ -51,13 +67,21 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
     out_pd["sd"] = out_pd["pr_m_rx1"] - out_pd["pr_m_rx2"]
 
     # Clean up
-    out_pd.dropna(subset=["sd"], inplace=True)
+    out_pd.dropna(subset=["sd"], inplace=True) # Drops non common satellites
     out_pd = out_pd.sort_values(by=["unix_time", "sv_id"]).reset_index(drop=True)
 
     return out_pd
 
 
 def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
+    """
+    Computes every possible double differences with no regards for pivot satellite. Requires sd measurements and
+    steering vectors noted "_rx1" and "_rx2" depending on the receiver. Double differences combines measurements from
+    two different satellites that will be noted "_sv1" and "_sv2".
+
+    :param sd_obs_pd: BITS raw dataframe like with sd
+    :return: BITS raw dataframe like with dd
+    """
     # Group by timestamp
     out_pd_list = []
     for _, group in tqdm(sd_obs_pd.groupby("unix_time"), total=len(sd_obs_pd["unix_time"].unique()),
@@ -69,6 +93,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
             local_dd_pd = group[i:].copy()
             local_dd_pd["sv_id1"] = local_dd_pd["sv_id"].iloc[0]
             local_dd_pd["prn_id1"] = local_dd_pd["prn_id_rx1"].iloc[0]
+            # Store data from local pivot SV as "_sv1"
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
             local_dd_pd["steering_vector_x_sv1"] = local_dd_pd["steering_vector_x_rx1"].iloc[0]
             local_dd_pd["steering_vector_y_sv1"] = local_dd_pd["steering_vector_y_rx1"].iloc[0]
@@ -85,7 +110,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
 
     out_pd = pd.concat(out_pd_list, ignore_index=True)
 
-    # Rename sv2 data
+    # Rename second SV as "_sv2"
     out_pd.rename(columns={"sv_id": "sv_id2", "prn_id": "prn_id2", "sd": "sd2",
                            "steering_vector_x_rx1": "steering_vector_x_sv2",
                            "steering_vector_y_rx1": "steering_vector_y_sv2",
@@ -99,7 +124,8 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd["delta_steering_vector_y"] = (out_pd["steering_vector_y_sv1"] - out_pd["steering_vector_y_sv2"])
     out_pd["delta_steering_vector_z"] = (out_pd["steering_vector_z_sv1"] - out_pd["steering_vector_z_sv2"])
 
-    out_pd = out_pd.sort_values(by=["unix_time", "sv_id1", "sv_id2"]).reset_index(drop=True)  # Clean up
+    # Clean up
+    out_pd = out_pd.sort_values(by=["unix_time", "sv_id1", "sv_id2"]).reset_index(drop=True)
 
     return out_pd
 
@@ -108,6 +134,21 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
                      time_between_meas:float = 1, compute_dd:None|bool=None, pivot_sv_id:str | None = None,
                      ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
                      pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None) -> pd.DataFrame:
+    """
+    Compute baseline with SD or DD. This function is not able to compute SD and DD at the same time.
+
+    :param rx_obs_pd: BITS raw dataframe with SD/DD computed or associated with rx2_obs_pd
+    :param rx2_obs_pd: BITS raw dataframe
+    :param weights_column: Name of the column containing the weights if any
+    :param time_between_meas: Maximum allowed time between measurements
+    :param compute_dd: set to True to compute SD + DD, False for SD only
+    :param pivot_sv_id: name of the pivot SV; set to None for no pivot
+    :param ephemeris_pd: BITS ephemeris dataframe
+    :param ephemeris_filepath: Filepath to Rinex nav ephemeris
+    :param pos_pd_rx1: BITS PVT dataframe associated with rx_obs_pd
+    :param pos_pd_rx2: BITS PVT dataframe associated with rx2_obs_pd
+    :return: BITS PVT like dataframe with baseline estimate
+    """
     # 0 determine mode (SD/DD); Default = DD
     if "dd" in rx_obs_pd.columns:
         mode = "dd"
@@ -143,7 +184,6 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     # 3 Compute baseline
     # Group by timestamp
     tqdm_desc = f"Computing baseline with {mode}"
-
     out_pd_list = []
     for _, group in tqdm(rx_obs_pd.groupby("unix_time"), total=len(rx_obs_pd["unix_time"].unique()), desc=tqdm_desc):
         result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
@@ -152,6 +192,14 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     return pd.DataFrame(out_pd_list)
 
 def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") -> dict:
+    """
+    Compute baseline at a specific timestamp.
+
+    :param group: BITS raw dataframe with geometry matrix and SD/DD computed at a single epoch
+    :param mode: set to "sd" or "dd" depending on data in group
+    :param weights_column: Name of the column containing the weights if any
+    :return: BITS PVT like dictionary with baseline estimate
+    """
     # Build measurement matrix
     Y = group[mode].to_numpy().reshape(-1, 1)
 
@@ -161,7 +209,7 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         ey = group["steering_vector_y_rx1"].to_numpy()
         ez = group["steering_vector_z_rx1"].to_numpy()
 
-        G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose()
+        G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose() # Add a ones column for inter-rx clock bias
     else:
         ex = group["delta_steering_vector_x"].to_numpy()
         ey = group["delta_steering_vector_y"].to_numpy()
@@ -190,7 +238,7 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         "mode": mode,
     }
     if result is not None:
-        estimate, covariance, _ = result
+        estimate, covariance, dop = result
         out_dict["bx_rx_m"] = float(estimate[0][0])
         out_dict["by_rx_m"] = float(estimate[1][0])
         out_dict["bz_rx_m"] = float(estimate[2][0])
@@ -212,6 +260,7 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         if mode == "sd":
             out_dict["covariance_b"] = float(covariance[3][3])
         out_dict["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
+        out_dict["DOP"] = float(dop)
     else:
         out_dict["bx_rx_m"] = None
         out_dict["by_rx_m"] = None
@@ -232,4 +281,5 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
             out_dict["cov_bb_rx_m"] = None
         if mode == "sd":
             out_dict["covariance_b"] = None
+            out_dict["DOP"] = None
     return out_dict
