@@ -149,9 +149,9 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
         result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
         out_pd_list.append(result_pd)
 
-    return pd.concat(out_pd_list, ignore_index=True)
+    return pd.DataFrame(out_pd_list)
 
-def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") -> pd.DataFrame:
+def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") -> dict:
     # Build measurement matrix
     Y = group[mode].to_numpy().reshape(-1, 1)
 
@@ -183,40 +183,53 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         result = None
 
     # Save the result
-    out_group = group.copy()
+    out_dict = {
+        "time": group["time_rx1"].iloc[0],
+        "corr_time": group["time_rx1"].iloc[0],
+        "unix_time": group["unix_time"].iloc[0],
+        "mode": mode,
+    }
     if result is not None:
         estimate, covariance, _ = result
-        residuals = Y - G @ estimate
-
-        out_group["baseline_x"] = float(estimate[0][0])
-        out_group["baseline_y"] = float(estimate[1][0])
-        out_group["baseline_z"] = float(estimate[2][0])
+        out_dict["bx_rx_m"] = float(estimate[0][0])
+        out_dict["by_rx_m"] = float(estimate[1][0])
+        out_dict["bz_rx_m"] = float(estimate[2][0])
         if mode == "sd":
-            out_group["baseline_b"] = float(estimate[3][0])
-        out_group["baseline"] = float(np.linalg.norm(estimate[:3]))
-        out_group["covariance_x"] = float(covariance[0][0])
-        out_group["covariance_y"] = float(covariance[1][1])
-        out_group["covariance_z"] = float(covariance[2][2])
-        if mode == "sd":
-            out_group["covariance_b"] = float(covariance[3][3])
-        out_group["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
+            out_dict["bb_rx_m"] = float(estimate[3][0])
+        out_dict["baseline_m"] = float(np.linalg.norm(estimate[:3]))
 
-        out_group["residuals"] = residuals
-        out_group["std"] = float(np.std(residuals.ravel()))
+        if weights_column in group.columns:
+            out_dict["cov_xx_rx_m"] = float(covariance[0][0])
+            out_dict["cov_yx_rx_m"] = float(covariance[0][1])
+            out_dict["cov_zx_rx_m"] = float(covariance[0][2])
+            out_dict["cov_bx_rx_m"] = float(covariance[0][3])
+            out_dict["cov_yy_rx_m"] = float(covariance[1][1])
+            out_dict["cov_zy_rx_m"] = float(covariance[1][2])
+            out_dict["cov_by_rx_m"] = float(covariance[1][3])
+            out_dict["cov_zz_rx_m"] = float(covariance[2][2])
+            out_dict["cov_bz_rx_m"] = float(covariance[2][3])
+            out_dict["cov_bb_rx_m"] = float(covariance[3][3])
+        if mode == "sd":
+            out_dict["covariance_b"] = float(covariance[3][3])
+        out_dict["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
     else:
-        out_group["baseline_x"] = None
-        out_group["baseline_y"] = None
-        out_group["baseline_z"] = None
+        out_dict["bx_rx_m"] = None
+        out_dict["by_rx_m"] = None
+        out_dict["bz_rx_m"] = None
         if mode == "sd":
-            out_group["baseline_b"] = None
-        out_group["baseline"] = None
-        out_group["covariance_x"] = None
-        out_group["covariance_y"] = None
-        out_group["covariance_z"] = None
+            out_dict["bb_rx_m"] = None
+        out_dict["baseline_m"] = None
+        if weights_column in group.columns:
+            out_dict["cov_xx_rx_m"] = None
+            out_dict["cov_yx_rx_m"] = None
+            out_dict["cov_zx_rx_m"] = None
+            out_dict["cov_bx_rx_m"] = None
+            out_dict["cov_yy_rx_m"] = None
+            out_dict["cov_zy_rx_m"] = None
+            out_dict["cov_by_rx_m"] = None
+            out_dict["cov_zz_rx_m"] = None
+            out_dict["cov_bz_rx_m"] = None
+            out_dict["cov_bb_rx_m"] = None
         if mode == "sd":
-            out_group["covariance_b"] = None
-
-        out_group["residuals"] = None
-        out_group["std"] = None
-
-    return out_group
+            out_dict["covariance_b"] = None
+    return out_dict
