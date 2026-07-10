@@ -245,7 +245,7 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
     if result is not None:
         estimate, covariance, dop, residuals = result
 
-        group["residuals"] = residuals
+        group["residuals_m"] = residuals
 
         baseline_serie["bx_rx_m"] = float(estimate[0][0])
         baseline_serie["by_rx_m"] = float(estimate[1][0])
@@ -254,22 +254,21 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
             baseline_serie["bb_rx_m"] = float(estimate[3][0])
         baseline_serie["baseline_m"] = float(np.linalg.norm(estimate[:3]))
 
-        if weights_column in group.columns:
-            baseline_serie["cov_xx_rx_m"] = float(covariance[0][0])
-            baseline_serie["cov_yx_rx_m"] = float(covariance[0][1])
-            baseline_serie["cov_zx_rx_m"] = float(covariance[0][2])
+        baseline_serie["cov_xx_rx_m"] = float(covariance[0][0])
+        baseline_serie["cov_yx_rx_m"] = float(covariance[0][1])
+        baseline_serie["cov_zx_rx_m"] = float(covariance[0][2])
+        baseline_serie["cov_yy_rx_m"] = float(covariance[1][1])
+        baseline_serie["cov_zy_rx_m"] = float(covariance[1][2])
+        baseline_serie["cov_zz_rx_m"] = float(covariance[2][2])
+        if mode == "sd":
             baseline_serie["cov_bx_rx_m"] = float(covariance[0][3])
-            baseline_serie["cov_yy_rx_m"] = float(covariance[1][1])
-            baseline_serie["cov_zy_rx_m"] = float(covariance[1][2])
             baseline_serie["cov_by_rx_m"] = float(covariance[1][3])
-            baseline_serie["cov_zz_rx_m"] = float(covariance[2][2])
             baseline_serie["cov_bz_rx_m"] = float(covariance[2][3])
             baseline_serie["cov_bb_rx_m"] = float(covariance[3][3])
-        if mode == "sd":
-            baseline_serie["covariance_b"] = float(covariance[3][3])
+
         baseline_serie["DOP"] = float(dop)
     else:
-        group["residuals"] = None
+        group["residuals_m"] = None
 
         baseline_serie["bx_rx_m"] = None
         baseline_serie["by_rx_m"] = None
@@ -277,18 +276,18 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         if mode == "sd":
             baseline_serie["bb_rx_m"] = None
         baseline_serie["baseline_m"] = None
-        if weights_column in group.columns:
-            baseline_serie["cov_xx_rx_m"] = None
-            baseline_serie["cov_yx_rx_m"] = None
-            baseline_serie["cov_zx_rx_m"] = None
+
+        baseline_serie["cov_xx_rx_m"] = None
+        baseline_serie["cov_yx_rx_m"] = None
+        baseline_serie["cov_zx_rx_m"] = None
+        baseline_serie["cov_yy_rx_m"] = None
+        baseline_serie["cov_zy_rx_m"] = None
+        baseline_serie["cov_zz_rx_m"] = None
+        if mode == "sd":
             baseline_serie["cov_bx_rx_m"] = None
-            baseline_serie["cov_yy_rx_m"] = None
-            baseline_serie["cov_zy_rx_m"] = None
             baseline_serie["cov_by_rx_m"] = None
-            baseline_serie["cov_zz_rx_m"] = None
             baseline_serie["cov_bz_rx_m"] = None
             baseline_serie["cov_bb_rx_m"] = None
-        if mode == "sd":
-            baseline_serie["covariance_b"] = None
-            baseline_serie["DOP"] = None
+
+        baseline_serie["DOP"] = None
     return group, baseline_serie
