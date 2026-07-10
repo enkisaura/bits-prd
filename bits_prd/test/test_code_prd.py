@@ -30,19 +30,17 @@ rx1_nmea_pd = bits.parsers.nmea.gga(rx1_nmea_filepath)
 rx2_nmea_pd = bits.parsers.nmea.gga(rx2_nmea_filepath)
 
 def test_sd():
-    psrd_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=False,
-    ephemeris_filepath=ephemeris_filepath, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
-
-    txt = f"Baseline estimate does not meet the expected accuracy. Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {psrd_pd["baseline_m"].mean()}m, max {psrd_pd["baseline_m"].max()}m."
-    assert abs(psrd_pd["baseline_m"].max() - baseline_length) < uncertainty, txt
+    prd(compute_dd=False)
 
 def test_dd():
-    psrd_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=True,
-                                        ephemeris_filepath=ephemeris_filepath, pos_pd_rx1=rx1_nmea_pd,
-                                        pos_pd_rx2=rx2_nmea_pd)
+    prd(compute_dd=True)
 
-    txt = f"Baseline estimate does not meet the expected accuracy. Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {psrd_pd["baseline_m"].mean()}m, max {psrd_pd["baseline_m"].max()}m."
-    assert abs(psrd_pd["baseline_m"].max() - baseline_length) < uncertainty, txt
+def prd(compute_dd:bool):
+    baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=compute_dd,
+    ephemeris_filepath=ephemeris_filepath, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
+
+    txt = f"Baseline estimate does not meet the expected accuracy. Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {baseline_pd["baseline_m"].mean()}m, max {baseline_pd["baseline_m"].max()}m."
+    assert abs(baseline_pd["baseline_m"].max() - baseline_length) < uncertainty, txt
 
 
 if __name__ == '__main__':

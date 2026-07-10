@@ -32,7 +32,7 @@ raw_rx2_geom_pd = steering_vectors.compute_geometry_matrix(raw_pd=raw_rx2_pd, ep
 raw_prd_pd = code_prd.get_prd(rx1_obs_pd=raw_rx1_geom_pd, rx2_obs_pd=raw_rx2_geom_pd, compute_dd=True)
 
 # 4 Compute baseline
-baseline_pd = code_prd.compute_baseline(rx_obs_pd=raw_prd_pd, weights_column="weight")
+baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_prd_pd, weights_column="weight")
 ```
 or more compact:
 ```python
@@ -54,6 +54,6 @@ raw_rx1_pd = bits.parsers.gnss_raw.rinex_obs(rx1_raw_filepath)
 raw_rx2_pd = bits.parsers.gnss_raw.rinex_obs(rx2_raw_filepath)
 
 # 2 Compute everything at once
-baseline_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, weights_column="weight", 
-                                        compute_dd=True, ephemeris_filepath=ephemeris_filepath)
+baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, weights_column="weight", 
+                                                compute_dd=True, ephemeris_filepath=ephemeris_filepath)
 ```

@@ -95,9 +95,9 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
             local_dd_pd["prn_id1"] = local_dd_pd["prn_id_rx1"].iloc[0]
             # Store data from local pivot SV as "_sv1"
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
-            local_dd_pd["steering_vector_x_sv1"] = local_dd_pd["steering_vector_x_rx1"].iloc[0]
-            local_dd_pd["steering_vector_y_sv1"] = local_dd_pd["steering_vector_y_rx1"].iloc[0]
-            local_dd_pd["steering_vector_z_sv1"] = local_dd_pd["steering_vector_z_rx1"].iloc[0]
+            local_dd_pd["e_x_sv1"] = local_dd_pd["e_x_rx1"].iloc[0]
+            local_dd_pd["e_y_sv1"] = local_dd_pd["e_y_rx1"].iloc[0]
+            local_dd_pd["e_z_sv1"] = local_dd_pd["e_z_rx1"].iloc[0]
             local_dd_pd = local_dd_pd[1:]
 
             at_timestamp_pd_list.append(local_dd_pd)
@@ -112,17 +112,17 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
 
     # Rename second SV as "_sv2"
     out_pd.rename(columns={"sv_id": "sv_id2", "prn_id": "prn_id2", "sd": "sd2",
-                           "steering_vector_x_rx1": "steering_vector_x_sv2",
-                           "steering_vector_y_rx1": "steering_vector_y_sv2",
-                           "steering_vector_z_rx1": "steering_vector_z_sv2"}, inplace=True)
+                           "e_x_rx1": "e_x_sv2",
+                           "e_y_rx1": "e_y_sv2",
+                           "e_z_rx1": "e_z_sv2"}, inplace=True)
 
     # Compute DD
     out_pd["dd"] = out_pd["sd1"] - out_pd["sd2"]
 
     # Add differenced steering vectors
-    out_pd["delta_steering_vector_x"] = (out_pd["steering_vector_x_sv1"] - out_pd["steering_vector_x_sv2"])
-    out_pd["delta_steering_vector_y"] = (out_pd["steering_vector_y_sv1"] - out_pd["steering_vector_y_sv2"])
-    out_pd["delta_steering_vector_z"] = (out_pd["steering_vector_z_sv1"] - out_pd["steering_vector_z_sv2"])
+    out_pd["delta_e_x"] = (out_pd["e_x_sv1"] - out_pd["e_x_sv2"])
+    out_pd["delta_e_y"] = (out_pd["e_y_sv1"] - out_pd["e_y_sv2"])
+    out_pd["delta_e_z"] = (out_pd["e_z_sv1"] - out_pd["e_z_sv2"])
 
     # Clean up
     out_pd = out_pd.sort_values(by=["unix_time", "sv_id1", "sv_id2"]).reset_index(drop=True)
@@ -133,7 +133,8 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
 def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
                      time_between_meas:float = 1, compute_dd:None|bool=None, pivot_sv_id:str | None = None,
                      ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
-                     pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None) -> pd.DataFrame:
+                     pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None) \
+        -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute baseline with SD or DD. This function is not able to compute SD and DD at the same time.
 
@@ -147,7 +148,7 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     :param ephemeris_filepath: Filepath to Rinex nav ephemeris
     :param pos_pd_rx1: BITS PVT dataframe associated with rx_obs_pd
     :param pos_pd_rx2: BITS PVT dataframe associated with rx2_obs_pd
-    :return: BITS PVT like dataframe with baseline estimate
+    :return: BITS PVT like dataframe with baseline estimate, BITS raw like dataframe
     """
     # 0 determine mode (SD/DD); Default = DD
     if "dd" in rx_obs_pd.columns:
@@ -167,12 +168,12 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
                          "receiver in argument rx2_obs_pd.")
 
     # 1 Compute steering vectors
-    if "steering_vector_x" not in rx_obs_pd.columns or "steering_vector_x_rx1" not in rx_obs_pd.columns:
+    if "e_x" not in rx_obs_pd.columns or "e_x_rx1" not in rx_obs_pd.columns:
         rx_obs_pd = compute_geometry_matrix(rx_obs_pd, ephemeris_pd=ephemeris_pd,
                                             ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx1)
 
     if rx2_obs_pd is not None:
-        if "steering_vector_x" not in rx2_obs_pd.columns:
+        if "e_x" not in rx2_obs_pd.columns:
             rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
                                                  ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2)
 
@@ -184,36 +185,43 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     # 3 Compute baseline
     # Group by timestamp
     tqdm_desc = f"Computing baseline with {mode}"
-    out_pd_list = []
+    raw_pd_list = []
+    baseline_serie_list = []
     for _, group in tqdm(rx_obs_pd.groupby("unix_time"), total=len(rx_obs_pd["unix_time"].unique()), desc=tqdm_desc):
-        result_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
-        out_pd_list.append(result_pd)
+        raw_pd, baseline_serie = window_compute_baseline(group, mode=mode, weights_column=weights_column)
+        raw_pd_list.append(raw_pd)
+        baseline_serie_list.append(baseline_serie)
 
-    return pd.DataFrame(out_pd_list)
+    # Merge all timestamps
+    raw_pd = pd.concat(raw_pd_list, ignore_index=True)
+    baseline_pd = pd.DataFrame(baseline_serie_list)
 
-def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") -> dict:
+    return baseline_pd, raw_pd
+
+def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") \
+        -> tuple[pd.DataFrame, pd.Series]:
     """
     Compute baseline at a specific timestamp.
 
     :param group: BITS raw dataframe with geometry matrix and SD/DD computed at a single epoch
     :param mode: set to "sd" or "dd" depending on data in group
     :param weights_column: Name of the column containing the weights if any
-    :return: BITS PVT like dictionary with baseline estimate
+    :return: BITS raw like dataframe, BITS PVT like Serie with baseline estimate
     """
     # Build measurement matrix
     Y = group[mode].to_numpy().reshape(-1, 1)
 
     # Build geometry matrix
     if mode == "sd":
-        ex = group["steering_vector_x_rx1"].to_numpy()
-        ey = group["steering_vector_y_rx1"].to_numpy()
-        ez = group["steering_vector_z_rx1"].to_numpy()
+        ex = group["e_x_rx1"].to_numpy()
+        ey = group["e_y_rx1"].to_numpy()
+        ez = group["e_z_rx1"].to_numpy()
 
         G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose() # Add a ones column for inter-rx clock bias
     else:
-        ex = group["delta_steering_vector_x"].to_numpy()
-        ey = group["delta_steering_vector_y"].to_numpy()
-        ez = group["delta_steering_vector_z"].to_numpy()
+        ex = group["delta_e_x"].to_numpy()
+        ey = group["delta_e_y"].to_numpy()
+        ez = group["delta_e_z"].to_numpy()
 
         G = np.vstack((ex, ey, ez)).transpose()
 
@@ -231,55 +239,56 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
         result = None
 
     # Save the result
-    out_dict = {
-        "time": group["time_rx1"].iloc[0],
-        "corr_time": group["time_rx1"].iloc[0],
-        "unix_time": group["unix_time"].iloc[0],
-        "mode": mode,
-    }
+    baseline_serie = pd.Series({"time": group["time_rx1"].iloc[0],
+                                "unix_time": group["unix_time"].iloc[0],
+                                "mode": mode,})
     if result is not None:
-        estimate, covariance, dop = result
-        out_dict["bx_rx_m"] = float(estimate[0][0])
-        out_dict["by_rx_m"] = float(estimate[1][0])
-        out_dict["bz_rx_m"] = float(estimate[2][0])
+        estimate, covariance, dop, residuals = result
+
+        group["residuals"] = residuals
+
+        baseline_serie["bx_rx_m"] = float(estimate[0][0])
+        baseline_serie["by_rx_m"] = float(estimate[1][0])
+        baseline_serie["bz_rx_m"] = float(estimate[2][0])
         if mode == "sd":
-            out_dict["bb_rx_m"] = float(estimate[3][0])
-        out_dict["baseline_m"] = float(np.linalg.norm(estimate[:3]))
+            baseline_serie["bb_rx_m"] = float(estimate[3][0])
+        baseline_serie["baseline_m"] = float(np.linalg.norm(estimate[:3]))
 
         if weights_column in group.columns:
-            out_dict["cov_xx_rx_m"] = float(covariance[0][0])
-            out_dict["cov_yx_rx_m"] = float(covariance[0][1])
-            out_dict["cov_zx_rx_m"] = float(covariance[0][2])
-            out_dict["cov_bx_rx_m"] = float(covariance[0][3])
-            out_dict["cov_yy_rx_m"] = float(covariance[1][1])
-            out_dict["cov_zy_rx_m"] = float(covariance[1][2])
-            out_dict["cov_by_rx_m"] = float(covariance[1][3])
-            out_dict["cov_zz_rx_m"] = float(covariance[2][2])
-            out_dict["cov_bz_rx_m"] = float(covariance[2][3])
-            out_dict["cov_bb_rx_m"] = float(covariance[3][3])
+            baseline_serie["cov_xx_rx_m"] = float(covariance[0][0])
+            baseline_serie["cov_yx_rx_m"] = float(covariance[0][1])
+            baseline_serie["cov_zx_rx_m"] = float(covariance[0][2])
+            baseline_serie["cov_bx_rx_m"] = float(covariance[0][3])
+            baseline_serie["cov_yy_rx_m"] = float(covariance[1][1])
+            baseline_serie["cov_zy_rx_m"] = float(covariance[1][2])
+            baseline_serie["cov_by_rx_m"] = float(covariance[1][3])
+            baseline_serie["cov_zz_rx_m"] = float(covariance[2][2])
+            baseline_serie["cov_bz_rx_m"] = float(covariance[2][3])
+            baseline_serie["cov_bb_rx_m"] = float(covariance[3][3])
         if mode == "sd":
-            out_dict["covariance_b"] = float(covariance[3][3])
-        out_dict["uncertainty"] = float(np.sqrt(np.trace(covariance[:3, :3])))
-        out_dict["DOP"] = float(dop)
+            baseline_serie["covariance_b"] = float(covariance[3][3])
+        baseline_serie["DOP"] = float(dop)
     else:
-        out_dict["bx_rx_m"] = None
-        out_dict["by_rx_m"] = None
-        out_dict["bz_rx_m"] = None
+        group["residuals"] = None
+
+        baseline_serie["bx_rx_m"] = None
+        baseline_serie["by_rx_m"] = None
+        baseline_serie["bz_rx_m"] = None
         if mode == "sd":
-            out_dict["bb_rx_m"] = None
-        out_dict["baseline_m"] = None
+            baseline_serie["bb_rx_m"] = None
+        baseline_serie["baseline_m"] = None
         if weights_column in group.columns:
-            out_dict["cov_xx_rx_m"] = None
-            out_dict["cov_yx_rx_m"] = None
-            out_dict["cov_zx_rx_m"] = None
-            out_dict["cov_bx_rx_m"] = None
-            out_dict["cov_yy_rx_m"] = None
-            out_dict["cov_zy_rx_m"] = None
-            out_dict["cov_by_rx_m"] = None
-            out_dict["cov_zz_rx_m"] = None
-            out_dict["cov_bz_rx_m"] = None
-            out_dict["cov_bb_rx_m"] = None
+            baseline_serie["cov_xx_rx_m"] = None
+            baseline_serie["cov_yx_rx_m"] = None
+            baseline_serie["cov_zx_rx_m"] = None
+            baseline_serie["cov_bx_rx_m"] = None
+            baseline_serie["cov_yy_rx_m"] = None
+            baseline_serie["cov_zy_rx_m"] = None
+            baseline_serie["cov_by_rx_m"] = None
+            baseline_serie["cov_zz_rx_m"] = None
+            baseline_serie["cov_bz_rx_m"] = None
+            baseline_serie["cov_bb_rx_m"] = None
         if mode == "sd":
-            out_dict["covariance_b"] = None
-            out_dict["DOP"] = None
-    return out_dict
+            baseline_serie["covariance_b"] = None
+            baseline_serie["DOP"] = None
+    return group, baseline_serie
