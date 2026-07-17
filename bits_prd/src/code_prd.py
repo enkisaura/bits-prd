@@ -186,20 +186,20 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     # Group by timestamp
     tqdm_desc = f"Computing baseline with {mode}"
     raw_pd_list = []
-    baseline_serie_list = []
+    baseline_pd_list = []
     for _, group in tqdm(rx_obs_pd.groupby("unix_time"), total=len(rx_obs_pd["unix_time"].unique()), desc=tqdm_desc):
-        raw_pd, baseline_serie = window_compute_baseline(group, mode=mode, weights_column=weights_column)
+        baseline_pd, raw_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
         raw_pd_list.append(raw_pd)
-        baseline_serie_list.append(baseline_serie)
+        baseline_pd_list.append(baseline_pd)
 
     # Merge all timestamps
     raw_pd = pd.concat(raw_pd_list, ignore_index=True)
-    baseline_pd = pd.DataFrame(baseline_serie_list)
+    baseline_pd = pd.concat(baseline_pd_list, ignore_index=True)
 
     return baseline_pd, raw_pd
 
 def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", weights_column:str="weight") \
-        -> tuple[pd.DataFrame, pd.Series]:
+        -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute baseline at a specific timestamp.
 
@@ -290,4 +290,4 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
             baseline_serie["cov_bb_rx_m"] = None
 
         baseline_serie["DOP"] = None
-    return group, baseline_serie
+    return baseline_serie.to_frame().T, group
