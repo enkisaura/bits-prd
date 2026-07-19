@@ -8,7 +8,6 @@ maintainers = [
   {name = "Enki Saura", email = "esaura@ikosconsulting.com"}
 ]
 description = "This is an awesome script !"
-dynamic = ["version"]
 dependencies = [
     "baguette_in_the_sky>=0.1.0", # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
     "pandas",
