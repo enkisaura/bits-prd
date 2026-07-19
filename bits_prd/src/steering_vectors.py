@@ -31,9 +31,6 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     else:
         out_pd = fast_sv_pos(raw_pd, pos_pd, ephemeris_pd, ephemeris_filepath)
 
-    # Compute steering vectors
-    out_pd = _compute_steering_vector(out_pd)
-
     return out_pd
 
 
@@ -57,16 +54,7 @@ def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame|None, ephemeris_
     pd_gnss_raw["unix_time"] = pd_gnss_raw["time"].apply(lambda timestamp: timestamp.timestamp_pd.timestamp())
     pd_gnss_raw.sort_values("unix_time", inplace=True)
 
-    # Add computed receiver position
-    out_pd = pd.merge_asof(
-        pd_gnss_raw,
-        pos_pd[["unix_time", "x_rx_m", "y_rx_m", "z_rx_m", "vx_rx_mps", "vy_rx_mps", "vz_rx_mps"]],
-        on="unix_time",
-        tolerance=1,
-        direction="nearest"
-    )
-
-    return out_pd
+    return pd_gnss_raw
 
 
 def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.DataFrame|None,
@@ -89,33 +77,25 @@ def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.Data
     pd_gnss_raw.sort_values("unix_time", inplace=True)
     pos_pd.sort_values("unix_time", inplace=True)
 
-    # Add a priori knowledge on receiver position
-    out_pd = pd.merge_asof(pd_gnss_raw, pos_pd[["unix_time", "x_rx_m", "y_rx_m", "z_rx_m"]],
-                                on="unix_time", direction="nearest").reset_index(drop=True)
+    # Add steering vectors
+    pvt_time_list = pos_pd["unix_time"].tolist()
+    raw_pd_list = []
+    for raw_time, group in pd_gnss_raw.groupby("unix_time"):
+        sv_position = group[["x_sv_m", "y_sv_m", "z_sv_m"]].to_numpy()
 
-    return out_pd
+        pvt_closest_time = min(pvt_time_list, key=lambda d: abs(d - raw_time))
+        pvt_at_timestamp = pos_pd[pos_pd["unix_time"] == pvt_closest_time]
+        rx_pos = pvt_at_timestamp[["x_rx_m", "y_rx_m", "z_rx_m"]].to_numpy()
 
-def _compute_steering_vector(gnss_data_pd: pd.DataFrame) -> pd.DataFrame:
-    """
-    Computes steering vectors.
+        geometry_matrix_np = bits.spp.compute_geometry_matrix(sv_position, rx_pos)
 
-    :param gnss_data_pd: BITS raw dataframe with SV et RX positions
-    :return: BITS raw dataframe with steering vectors
-    """
-    # Compute steering vectors
-    gnss_data_pd["range"] = np.sqrt(
-        (gnss_data_pd["x_sv_m"] - gnss_data_pd["x_rx_m"]) ** 2 +
-        (gnss_data_pd["y_sv_m"] - gnss_data_pd["y_rx_m"]) ** 2 +
-        (gnss_data_pd["z_sv_m"] - gnss_data_pd["z_rx_m"]) ** 2
-    )
+        group["e_x"] = geometry_matrix_np[:, 0]
+        group["e_y"] = geometry_matrix_np[:, 1]
+        group["e_z"] = geometry_matrix_np[:, 2]
+        group["e_b"] = geometry_matrix_np[:, 3]
 
-    gnss_data_pd["steering_vector_x"] = (gnss_data_pd["x_sv_m"] - gnss_data_pd["x_rx_m"]) / gnss_data_pd["range"]
-    gnss_data_pd["steering_vector_y"] = (gnss_data_pd["y_sv_m"] - gnss_data_pd["y_rx_m"]) / gnss_data_pd["range"]
-    gnss_data_pd["steering_vector_z"] = (gnss_data_pd["z_sv_m"] - gnss_data_pd["z_rx_m"]) / gnss_data_pd["range"]
+        raw_pd_list.append(group)
 
-    # Compute SV elevation and azimuth
-    pvt = gnss_data_pd[["time", "x_rx_m", "y_rx_m", "z_rx_m"]].drop_duplicates(subset="time", keep="first")
-    gnss_data_pd = bits.spp.get_sv_el_az(gnss_data_pd, pvt)
+    pd_gnss_raw = pd.concat(raw_pd_list, ignore_index=True)
 
-
-    return gnss_data_pd
+    return pd_gnss_raw
