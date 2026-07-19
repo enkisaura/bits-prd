@@ -1,5 +1,6 @@
 [project]
 name = "bits_prd"
+version = "1.0.0"
 authors = [
   {name = "Enki Saura", email = "esaura@ikosconsulting.com"},
 ]
@@ -7,9 +8,8 @@ maintainers = [
   {name = "Enki Saura", email = "esaura@ikosconsulting.com"}
 ]
 description = "This is an awesome script !"
-dynamic = ["version"]
 dependencies = [
-    "baguette_in_the_sky", # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
+    "baguette_in_the_sky>=0.1.0", # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
     "pandas",
     "numpy",
     "tqdm",
