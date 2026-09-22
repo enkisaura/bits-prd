@@ -61,9 +61,11 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
 
     # 2 Compute single differences
     out_pd["sd"] = out_pd["pr_m_rx1"] - out_pd["pr_m_rx2"]
+    if ("pr_rate_mps_rx1" in out_pd.columns) and ("pr_rate_mps_rx2" in out_pd.columns):
+        out_pd["sd_rate"] = out_pd["pr_rate_mps_rx1"] - out_pd["pr_rate_mps_rx2"]
 
     # Clean up
-    out_pd.dropna(subset=["sd"], inplace=True) # Drops non common satellites
+    out_pd.dropna(subset=["sd", "sd_rate"], inplace=True) # Drops non common satellites
     out_pd = out_pd.sort_values(by=["time", "sv_id"]).reset_index(drop=True)
 
     return out_pd
@@ -78,6 +80,11 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     :param sd_obs_pd: BITS raw dataframe like with sd
     :return: BITS raw dataframe like with dd
     """
+    if "sd_rate" in sd_obs_pd.columns:
+        sd_rate = True
+    else:
+        sd_rate = False
+
     # Group by timestamp
     out_pd_list = []
     for _, group in tqdm(sd_obs_pd.groupby("time"), total=len(sd_obs_pd["time"].unique()),
@@ -91,6 +98,8 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
             local_dd_pd["prn_id1"] = local_dd_pd["prn_id_rx1"].iloc[0]
             # Store data from local pivot SV as "_sv1"
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
+            if sd_rate:
+                local_dd_pd["sd_rate1"] = local_dd_pd["sd_rate"].iloc[0]
             local_dd_pd["e_x_sv1"] = local_dd_pd["e_x_rx1"].iloc[0]
             local_dd_pd["e_y_sv1"] = local_dd_pd["e_y_rx1"].iloc[0]
             local_dd_pd["e_z_sv1"] = local_dd_pd["e_z_rx1"].iloc[0]
@@ -111,9 +120,13 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
                            "e_x_rx1": "e_x_sv2",
                            "e_y_rx1": "e_y_sv2",
                            "e_z_rx1": "e_z_sv2"}, inplace=True)
+    if sd_rate:
+        out_pd.rename(columns={"sd_rate": "sd_rate2"}, inplace=True)
 
     # Compute DD
     out_pd["dd"] = out_pd["sd1"] - out_pd["sd2"]
+    if sd_rate:
+        out_pd["dd_rate"] = out_pd["sd_rate1"] - out_pd["sd_rate2"]
 
     # Add differenced steering vectors
     out_pd["delta_e_x"] = (out_pd["e_x_sv1"] - out_pd["e_x_sv2"])
@@ -124,6 +137,9 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd = out_pd.sort_values(by=["time", "sv_id1", "sv_id2"]).reset_index(drop=True)
 
     return out_pd
+
+def compute_speed_space_decorrelation():
+    pass
 
 
 def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
@@ -191,6 +207,10 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     # Merge all timestamps
     raw_pd = pd.concat(raw_pd_list, ignore_index=True)
     baseline_pd = pd.concat(baseline_pd_list, ignore_index=True)
+
+    # Clean
+    raw_pd["time"] = raw_pd["time"].astype("datetime64[ns]")
+    baseline_pd["time"] = baseline_pd["time"].astype("datetime64[ns]")
 
     return baseline_pd, raw_pd
 
@@ -285,4 +305,61 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
             baseline_serie["cov_bb_rx_m"] = None
 
         baseline_serie["DOP"] = None
+
+    # Compute speed
+    if f"{mode}_rate" in group.columns:
+        dY = group[f"{mode}_rate"].to_numpy().reshape(-1, 1)
+        try:
+            speed_result = bits.single_point_positioning.weighted_least_square(dY, G, W)
+        except:
+            speed_result = None
+
+        # Save the result
+        if speed_result is not None:
+            v_estimate, v_covariance, _, v_residuals = speed_result
+
+            group["vresiduals_mps"] = residuals
+
+            baseline_serie["vbx_rx_mps"] = float(v_estimate[0][0])
+            baseline_serie["vby_rx_mps"] = float(v_estimate[1][0])
+            baseline_serie["vbz_rx_mps"] = float(v_estimate[2][0])
+            if mode == "sd":
+                baseline_serie["vbb_rx_mps"] = float(v_estimate[3][0])
+            baseline_serie["vbaseline_mps"] = float(np.linalg.norm(v_estimate[:3]))
+
+            baseline_serie["cov_vxvx_rx_mps"] = float(v_covariance[0][0])
+            baseline_serie["cov_vyvx_rx_mps"] = float(v_covariance[0][1])
+            baseline_serie["cov_vzvx_rx_mps"] = float(v_covariance[0][2])
+            baseline_serie["cov_vyvy_rx_mps"] = float(v_covariance[1][1])
+            baseline_serie["cov_vzvy_rx_mps"] = float(v_covariance[1][2])
+            baseline_serie["cov_vzvz_rx_mps"] = float(v_covariance[2][2])
+            if mode == "sd":
+                baseline_serie["cov_vbvx_rx_mps"] = float(v_covariance[0][3])
+                baseline_serie["cov_vbvy_rx_mps"] = float(v_covariance[1][3])
+                baseline_serie["cov_vbvz_rx_mps"] = float(v_covariance[2][3])
+                baseline_serie["cov_vbvb_rx_mps"] = float(v_covariance[3][3])
+
+        else:
+            group["vresiduals_mps"] = None
+
+            baseline_serie["vbx_rx_mps"] = None
+            baseline_serie["vby_rx_mps"] = None
+            baseline_serie["vbz_rx_mps"] = None
+            if mode == "sd":
+                baseline_serie["vbb_rx_mps"] = None
+            baseline_serie["vbaseline_mps"] = None
+
+            baseline_serie["cov_vxvx_rx_mps"] = None
+            baseline_serie["cov_vyvx_rx_mps"] = None
+            baseline_serie["cov_vzvx_rx_mps"] = None
+            baseline_serie["cov_vyvy_rx_mps"] = None
+            baseline_serie["cov_vzvy_rx_mps"] = None
+            baseline_serie["cov_vzvz_rx_mps"] = None
+            if mode == "sd":
+                baseline_serie["cov_vbvx_rx_mps"] = None
+                baseline_serie["cov_vbvy_rx_mps"] = None
+                baseline_serie["cov_vbvz_rx_mps"] = None
+                baseline_serie["cov_vbvb_rx_mps"] = None
+
+
     return baseline_serie.to_frame().T, group
