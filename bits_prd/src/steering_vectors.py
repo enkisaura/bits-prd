@@ -18,14 +18,6 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     :param pos_pd: BITS PVT dataframe
     :return: BITS raw dataframe with geometry matrix
     """
-
-    if "unix_time" not in raw_pd.columns:
-        raw_pd["unix_time"] = raw_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
-
-    if pos_pd is not None:
-        if "unix_time" not in pos_pd.columns:
-            pos_pd["unix_time"] = pos_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
-
     if pos_pd is None:
         out_pd = slow_sv_pos(raw_pd, ephemeris_pd, ephemeris_filepath) # Also computes approximate position
     else:
@@ -45,14 +37,14 @@ def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame|None, ephemeris_
     :return: BITS raw dataframe with SV and RX positions
     """
     # Get SV positions
-    pos_pd, pd_gnss_raw = bits.spp.get_position_estimate(pd_gnss_raw=raw_pd,
-                                                         pd_ephemeris=ephemeris_pd, ephem_filepath=ephemeris_filepath,
-                                                         verbose=True)
+    pos_pd, pd_gnss_raw = bits.single_point_positioning.get_position_estimate(pd_gnss_raw=raw_pd,
+                                                                              pd_ephemeris=ephemeris_pd,
+                                                                              ephem_filepath=ephemeris_filepath,
+                                                                              verbose=True)
 
     # Clean up
-    pos_pd.sort_values("unix_time", inplace=True)
-    pd_gnss_raw["unix_time"] = pd_gnss_raw["time"].apply(lambda timestamp: timestamp.timestamp_pd.timestamp())
-    pd_gnss_raw.sort_values("unix_time", inplace=True)
+    pos_pd.sort_values("time", inplace=True)
+    pd_gnss_raw.sort_values("time", inplace=True)
 
     return pd_gnss_raw
 
@@ -69,25 +61,24 @@ def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.Data
     :return: BITS raw dataframe with SV and RX positions
     """
     # Get SV positions
-    pd_gnss_raw = bits.spp.get_sv_states(pd_gnss_raw=raw_pd,
-                                         pd_ephemeris=ephemeris_pd, ephem_filepath=ephemeris_filepath)
+    pd_gnss_raw = bits.sv_model.get_sv_states(pd_gnss_raw=raw_pd, pd_ephemeris=ephemeris_pd,
+                                              ephem_filepath=ephemeris_filepath)
 
     # Clean up
-    pd_gnss_raw["unix_time"] = pd_gnss_raw["time"].apply(lambda timestamp: timestamp.timestamp_pd.timestamp())
-    pd_gnss_raw.sort_values("unix_time", inplace=True)
-    pos_pd.sort_values("unix_time", inplace=True)
+    pd_gnss_raw.sort_values("time", inplace=True)
+    pos_pd.sort_values("time", inplace=True)
 
     # Add steering vectors
-    pvt_time_list = pos_pd["unix_time"].tolist()
+    pvt_time_list = pos_pd["time"].tolist()
     raw_pd_list = []
-    for raw_time, group in pd_gnss_raw.groupby("unix_time"):
+    for raw_time, group in pd_gnss_raw.groupby("time"):
         sv_position = group[["x_sv_m", "y_sv_m", "z_sv_m"]].to_numpy()
 
         pvt_closest_time = min(pvt_time_list, key=lambda d: abs(d - raw_time))
-        pvt_at_timestamp = pos_pd[pos_pd["unix_time"] == pvt_closest_time]
+        pvt_at_timestamp = pos_pd[pos_pd["time"] == pvt_closest_time]
         rx_pos = pvt_at_timestamp[["x_rx_m", "y_rx_m", "z_rx_m"]].to_numpy()
 
-        geometry_matrix_np = bits.spp.compute_geometry_matrix(sv_position, rx_pos)
+        geometry_matrix_np = bits.single_point_positioning.compute_geometry_matrix(sv_position, rx_pos)
 
         group["e_x"] = geometry_matrix_np[:, 0]
         group["e_y"] = geometry_matrix_np[:, 1]

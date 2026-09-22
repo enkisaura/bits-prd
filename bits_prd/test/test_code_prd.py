@@ -24,25 +24,29 @@ rx2_raw_filepath = os.path.join(data_filepath, "RX0200FRA_R_20261241729_00U_01S_
 ephemeris_filepath = os.path.join(data_filepath, "TLSG00FRA_R_20261240000_01D_MN.rnx")
 
 # Parse data
-raw_rx1_pd = bits.parsers.gnss_raw.rinex_obs(rx1_raw_filepath)
-raw_rx2_pd = bits.parsers.gnss_raw.rinex_obs(rx2_raw_filepath)
-rx1_nmea_pd = bits.parsers.nmea.gga(rx1_nmea_filepath)
-rx2_nmea_pd = bits.parsers.nmea.gga(rx2_nmea_filepath)
+raw_rx1_pd = bits.parse.raw.rinex(rx1_raw_filepath)
+raw_rx2_pd = bits.parse.raw.rinex(rx2_raw_filepath)
+rx1_nmea_pd = bits.parse.pvt.gga(rx1_nmea_filepath)
+rx2_nmea_pd = bits.parse.pvt.gga(rx2_nmea_filepath)
 
-def test_sd():
-    prd(compute_dd=False)
+def test_sd(verbose=False):
+    prd(compute_dd=False, verbose=verbose)
 
-def test_dd():
-    prd(compute_dd=True)
+def test_dd(verbose=False):
+    prd(compute_dd=True, verbose=verbose)
 
-def prd(compute_dd:bool):
+def prd(compute_dd:bool, verbose=False):
     baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=compute_dd,
     ephemeris_filepath=ephemeris_filepath, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
 
-    txt = f"Baseline estimate does not meet the expected accuracy. Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {baseline_pd["baseline_m"].mean()}m, max {baseline_pd["baseline_m"].max()}m."
+    report = f"Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {baseline_pd["baseline_m"].mean()}m, max {baseline_pd["baseline_m"].max()}m."
+    if verbose:
+        print(report)
+
+    txt = f"Baseline estimate does not meet the expected accuracy. {report}"
     assert abs(baseline_pd["baseline_m"].max() - baseline_length) < uncertainty, txt
 
 
 if __name__ == '__main__':
-    test_sd()
-    test_dd()
+    test_sd(verbose=True)
+    test_dd(verbose=True)

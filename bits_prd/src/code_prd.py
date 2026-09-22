@@ -21,10 +21,6 @@ def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_mea
     :param pivot_sv_id: name of the pivot SV; set to None for no pivot
     :return: BITS raw dataframe like with sd and/or dd
     """
-    # Add unix_time in seconds for easier sorting. In a futur version of BITS this step will not be required anymore.
-    if "unix_time" not in rx1_obs_pd.columns:
-        rx1_obs_pd["unix_time"] = rx1_obs_pd["time"].apply(lambda gnss_timestamp: gnss_timestamp.pd_timestamp().timestamp())
-
     # Compute single differences
     out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=time_between_meas/2)
 
@@ -50,15 +46,15 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
     :return: BITS raw dataframe like with sd
     """
     # 0 Clean up
-    rx1_obs_pd = rx1_obs_pd.sort_values("unix_time")
-    rx2_obs_pd = rx2_obs_pd.sort_values("unix_time")
+    rx1_obs_pd = rx1_obs_pd.sort_values("time")
+    rx2_obs_pd = rx2_obs_pd.sort_values("time")
 
     # 1 Merge common satellites from rx1_obs_pd and rx2_obs_pd
     out_pd = pd.merge_asof(
         rx1_obs_pd, rx2_obs_pd,
-        on="unix_time",
+        on="time",
         by="sv_id",
-        tolerance=dt_tolerance,
+        tolerance=pd.Timedelta(seconds=dt_tolerance),
         direction="nearest",
         suffixes=("_rx1", "_rx2")
     )
@@ -68,7 +64,7 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
 
     # Clean up
     out_pd.dropna(subset=["sd"], inplace=True) # Drops non common satellites
-    out_pd = out_pd.sort_values(by=["unix_time", "sv_id"]).reset_index(drop=True)
+    out_pd = out_pd.sort_values(by=["time", "sv_id"]).reset_index(drop=True)
 
     return out_pd
 
@@ -84,7 +80,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     """
     # Group by timestamp
     out_pd_list = []
-    for _, group in tqdm(sd_obs_pd.groupby("unix_time"), total=len(sd_obs_pd["unix_time"].unique()),
+    for _, group in tqdm(sd_obs_pd.groupby("time"), total=len(sd_obs_pd["time"].unique()),
                                      desc="Computing double differences"):
         at_timestamp_pd_list = []
 
@@ -125,7 +121,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd["delta_e_z"] = (out_pd["e_z_sv1"] - out_pd["e_z_sv2"])
 
     # Clean up
-    out_pd = out_pd.sort_values(by=["unix_time", "sv_id1", "sv_id2"]).reset_index(drop=True)
+    out_pd = out_pd.sort_values(by=["time", "sv_id1", "sv_id2"]).reset_index(drop=True)
 
     return out_pd
 
@@ -175,19 +171,19 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     if rx2_obs_pd is not None:
         if "e_x" not in rx2_obs_pd.columns:
             rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
-                                                 ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2)
+                                                 ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2).dropna()
 
     # 2 Compute Single/Double differences
     if rx2_obs_pd is not None:
         rx_obs_pd = get_prd(rx_obs_pd, rx2_obs_pd, time_between_meas=time_between_meas, compute_dd=compute_dd,
-        pivot_sv_id=pivot_sv_id)
+        pivot_sv_id=pivot_sv_id).dropna()
 
     # 3 Compute baseline
     # Group by timestamp
     tqdm_desc = f"Computing baseline with {mode}"
     raw_pd_list = []
     baseline_pd_list = []
-    for _, group in tqdm(rx_obs_pd.groupby("unix_time"), total=len(rx_obs_pd["unix_time"].unique()), desc=tqdm_desc):
+    for _, group in tqdm(rx_obs_pd.groupby("time"), total=len(rx_obs_pd["time"].unique()), desc=tqdm_desc):
         baseline_pd, raw_pd = window_compute_baseline(group, mode=mode, weights_column=weights_column)
         raw_pd_list.append(raw_pd)
         baseline_pd_list.append(baseline_pd)
@@ -234,13 +230,12 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
 
     # Compute baseline
     try:
-        result = bits.spp.weighted_least_square(Y, G, W)
+        result = bits.single_point_positioning.weighted_least_square(Y, G, W)
     except:
         result = None
 
     # Save the result
-    baseline_serie = pd.Series({"time": group["time_rx1"].iloc[0],
-                                "unix_time": group["unix_time"].iloc[0],
+    baseline_serie = pd.Series({"time": group["time"].iloc[0],
                                 "mode": mode,})
     if result is not None:
         estimate, covariance, dop, residuals = result
