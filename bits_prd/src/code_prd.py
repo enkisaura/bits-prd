@@ -1,5 +1,5 @@
-from typing import Literal
-
+import warnings
+from typing import Literal, List
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -138,14 +138,26 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
 
     return out_pd
 
-def compute_speed_space_decorrelation():
-    pass
+def decorrelate_space(df: pd.DataFrame) -> pd.DataFrame:
+    if not np.isin(["pr_rate_mps", "e_x", "e_y", "e_z", "vx_sv_mps", "vy_sv_mps", "vz_sv_mps"], df.columns).all():
+        warnings.warn("Need pseudorange rate, steering vectors and satellite speed to decorrelate space.")
+
+    df.rename(columns={"pr_rate_mps": "raw_pr_rate_mps"}, inplace=True)
+
+    pr_rate = df["raw_pr_rate_mps"].to_numpy()
+    X_dot = np.vstack((df["vx_sv_mps"], df["vy_sv_mps"], df["vz_sv_mps"]))
+    G = np.vstack((df["e_x"], df["e_y"], df["e_z"]))
+
+    df["pr_rate_mps"] = pr_rate + np.sum(X_dot * G, axis=0)
+
+    return df
 
 
 def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
                      time_between_meas:float = 1, compute_dd:None|bool=None, pivot_sv_id:str | None = None,
                      ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
-                     pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None) \
+                     pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None,
+                     corrections:List[Literal["space_decorrelation", "time_decorrelation", "all"]] = ["all"]) \
         -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute baseline with SD or DD. This function is not able to compute SD and DD at the same time.
@@ -160,6 +172,7 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     :param ephemeris_filepath: Filepath to Rinex nav ephemeris
     :param pos_pd_rx1: BITS PVT dataframe associated with rx_obs_pd
     :param pos_pd_rx2: BITS PVT dataframe associated with rx2_obs_pd
+    :param corrections: Corrections to be applied ("space_decorrelation", "time_decorrelation", "all"), defaults to all
     :return: BITS PVT like dataframe with baseline estimate, BITS raw like dataframe
     """
     # 0 determine mode (SD/DD); Default = DD
@@ -188,6 +201,11 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
         if "e_x" not in rx2_obs_pd.columns:
             rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
                                                  ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2).dropna()
+
+    # 1 bis space decorrelation
+    if ("space_decorrelation" in corrections) or ("all" in corrections):
+        rx_obs_pd = decorrelate_space(rx_obs_pd)
+        rx2_obs_pd = decorrelate_space(rx2_obs_pd)
 
     # 2 Compute Single/Double differences
     if rx2_obs_pd is not None:
