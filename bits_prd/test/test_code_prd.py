@@ -8,26 +8,35 @@ Usage: Used from pytest
     python -m pytest -v
 """
 
-import os
-import bits
+import pandas as pd
+import numpy as np
+from bits import parse
+from bits.src.utils import get_example_data_filepath, fast_parse
 
 from bits_prd.src import code_prd
 
-baseline_length = 20
-uncertainty = 5
-
-data_filepath = os.path.join(os.getcwd(), "bits_prd", "test", "data")
-rx1_nmea_filepath = os.path.join(data_filepath, "RX01_nmea.txt")
-rx2_nmea_filepath = os.path.join(data_filepath, "RX02_nmea.txt")
-rx1_raw_filepath = os.path.join(data_filepath, "RX0100FRA_R_20261241729_00U_01S_MO.rnx")
-rx2_raw_filepath = os.path.join(data_filepath, "RX0200FRA_R_20261241729_00U_01S_MO.rnx")
-ephemeris_filepath = os.path.join(data_filepath, "TLSG00FRA_R_20261240000_01D_MN.rnx")
+uncertainty = 12
 
 # Parse data
-raw_rx1_pd = bits.parse.raw.rinex(rx1_raw_filepath)
-raw_rx2_pd = bits.parse.raw.rinex(rx2_raw_filepath)
-rx1_nmea_pd = bits.parse.pvt.gga(rx1_nmea_filepath)
-rx2_nmea_pd = bits.parse.pvt.gga(rx2_nmea_filepath)
+raw_rx1_pd = fast_parse(get_example_data_filepath("raw", rover_type="fixed")[0], parse.raw.rinex)
+raw_rx2_pd = fast_parse(get_example_data_filepath("raw", rover_type="circular")[0], parse.raw.rinex)
+rx1_nmea_pd = fast_parse(get_example_data_filepath("pvt", rover_type="fixed")[0], parse.pvt.gga)
+rx2_nmea_pd = fast_parse(get_example_data_filepath("pvt", rover_type="circular")[0], parse.pvt.gga)
+ephemeris_df = fast_parse(get_example_data_filepath("ephemeris", rover_type="fixed")[0], parse.ephemeris.rinex)
+
+# Get ground truth
+gt_pd = pd.merge_asof(
+    rx1_nmea_pd, rx2_nmea_pd,
+    on="time",
+    tolerance=pd.Timedelta(seconds=0.5),
+    direction="nearest",
+    suffixes=("_rx1", "_rx2")
+)
+gt_pd["baseline_m"] = np.sqrt((gt_pd["x_rx_m_rx1"] - gt_pd["x_rx_m_rx2"]) ** 2 +
+                              (gt_pd["y_rx_m_rx1"] - gt_pd["y_rx_m_rx2"]) ** 2 +
+                              (gt_pd["z_rx_m_rx1"] - gt_pd["z_rx_m_rx2"]) ** 2)
+gt_pd = gt_pd[["time", "baseline_m"]]
+
 
 def test_sd(verbose=False):
     prd(compute_dd=False, verbose=verbose)
@@ -37,14 +46,26 @@ def test_dd(verbose=False):
 
 def prd(compute_dd:bool, verbose=False):
     baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=compute_dd,
-    ephemeris_filepath=ephemeris_filepath, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
+    ephemeris_pd=ephemeris_df, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
 
-    report = f"Expected: {baseline_length}+/-{uncertainty}m, estimated: mean {baseline_pd["baseline_m"].mean()}m, max {baseline_pd["baseline_m"].max()}m."
+    baseline_pd["time"] = baseline_pd["time"].astype("datetime64[ns]") # TODO: better fix
+
+    # Get error
+    baseline_pd = pd.merge_asof(
+        baseline_pd, gt_pd,
+        on="time",
+        tolerance=pd.Timedelta(seconds=0.5),
+        direction="nearest",
+        suffixes=("", "_gt")
+    )
+    baseline_pd["baseline_error_m"] = np.abs(baseline_pd["baseline_m"] - baseline_pd["baseline_m_gt"])
+
+    report = f"Expected accuracy: {uncertainty}m, estimated: mean {baseline_pd["baseline_error_m"].mean()}m, max {baseline_pd["baseline_error_m"].max()}m."
     if verbose:
         print(report)
 
     txt = f"Baseline estimate does not meet the expected accuracy. {report}"
-    assert abs(baseline_pd["baseline_m"].max() - baseline_length) < uncertainty, txt
+    assert baseline_pd["baseline_error_m"].max() < uncertainty, txt
 
 
 if __name__ == '__main__':
