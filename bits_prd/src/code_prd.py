@@ -50,6 +50,7 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
     rx2_obs_pd = rx2_obs_pd.sort_values("time")
 
     # 1 Merge common satellites from rx1_obs_pd and rx2_obs_pd
+    rx2_obs_pd = rx2_obs_pd.assign(time_rx2=rx2_obs_pd["time"])
     out_pd = pd.merge_asof(
         rx1_obs_pd, rx2_obs_pd,
         on="time",
@@ -138,19 +139,64 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
 
     return out_pd
 
-def decorrelate_space(df: pd.DataFrame) -> pd.DataFrame:
-    if not np.isin(["pr_rate_mps", "e_x", "e_y", "e_z", "vx_sv_mps", "vy_sv_mps", "vz_sv_mps"], df.columns).all():
+def decorrelate_space(obs_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For short baselines, the satellite radial velocities are strongly correlated between the two receivers and,
+    therefore, cancel out when applying pseudorange rate differencing. However, as the baseline length increases, this
+    correlation diminishes. As a result, the relative speed estimates derived from pseudorange rate differencing no
+    longer accurately represent the true relative velocity between the receivers.
+
+    :param obs_df: BITS raw dataframe with pseudorange rate, steering vectors and satellite speed
+    :return: BITS raw dataframe with corrected "pr_rate_mps"
+    """
+    if not np.isin(["pr_rate_mps", "e_x", "e_y", "e_z", "vx_sv_mps", "vy_sv_mps", "vz_sv_mps"], obs_df.columns).all():
         warnings.warn("Need pseudorange rate, steering vectors and satellite speed to decorrelate space.")
 
-    df.rename(columns={"pr_rate_mps": "raw_pr_rate_mps"}, inplace=True)
+    obs_df.rename(columns={"pr_rate_mps": "raw_pr_rate_mps"}, inplace=True)
 
-    pr_rate = df["raw_pr_rate_mps"].to_numpy()
-    X_dot = np.vstack((df["vx_sv_mps"], df["vy_sv_mps"], df["vz_sv_mps"]))
-    G = np.vstack((df["e_x"], df["e_y"], df["e_z"]))
+    pr_rate = obs_df["raw_pr_rate_mps"].to_numpy()
+    X_dot = np.vstack((obs_df["vx_sv_mps"], obs_df["vy_sv_mps"], obs_df["vz_sv_mps"]))
+    G = np.vstack((obs_df["e_x"], obs_df["e_y"], obs_df["e_z"]))
 
-    df["pr_rate_mps"] = pr_rate + np.sum(X_dot * G, axis=0)
+    obs_df["pr_rate_mps"] = pr_rate + np.sum(X_dot * G, axis=0)
 
-    return df
+    return obs_df
+
+
+def decorrelate_time(baseline_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    By considering two receivers A and B sharing their measurement at time tA and tB , applying PRD between those
+    measurements would result in a baseline estimate between receiver A at time tA and B at time tB. With moving
+    receivers, this baseline estimate does not represent effectively an actual distance between receivers anymore.
+
+    b(t1/2) = b(tA, tB) + 1/2 (tA-tB) db
+
+    :param baseline_df:
+    :return:
+    """
+    if not np.isin(["vbx_rx_mps", "vby_rx_mps", "vbz_rx_mps", "vbaseline_mps"], baseline_df.columns).all():
+        warnings.warn("No baseline rate estimate found, cannot decorrelate time.")
+    # Estimate receivers offset
+    if "bb_rx_m" in baseline_df.columns:
+        dt = np.asarray(baseline_df["bb_rx_m"] / bits.const.C, dtype=np.float64)
+    elif "time_rx2" in baseline_df.columns:
+        dt = np.asarray((baseline_df["time"] - baseline_df["time_rx2"]) / np.timedelta64(1, "s"), dtype=np.float64)
+    else:
+        warnings.warn("No between receivers time bias found, cannot decorrelate time.")
+        return baseline_df
+
+    baseline_df.rename(columns={"bx_rx_m": "raw_bx_rx_m", "by_rx_m": "raw_by_rx_m", "bz_rx_m": "raw_bz_rx_m",
+                                "bb_rx_m": "raw_bb_rx_m", "baseline_m": "raw_baseline_m", "time": "raw_time"}, inplace=True)
+
+    offset = pd.to_timedelta(np.nan_to_num(0.5 * dt, nan=0.0), unit="s")
+    baseline_df["time"] = baseline_df["raw_time"] + offset
+    baseline_df["bx_rx_m"] = baseline_df["raw_bx_rx_m"] + 0.5 * dt * baseline_df["vbx_rx_mps"]
+    baseline_df["by_rx_m"] = baseline_df["raw_by_rx_m"] + 0.5 * dt * baseline_df["vby_rx_mps"]
+    baseline_df["bz_rx_m"] = baseline_df["raw_bz_rx_m"] + 0.5 * dt * baseline_df["vbz_rx_mps"]
+    baseline_df["raw_bb_rx_m"] = 0
+    baseline_df["baseline_m"] = baseline_df["raw_baseline_m"] + 0.5 * dt * baseline_df["vbaseline_mps"]
+
+    return baseline_df
 
 
 def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
@@ -225,6 +271,10 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     # Merge all timestamps
     raw_pd = pd.concat(raw_pd_list, ignore_index=True)
     baseline_pd = pd.concat(baseline_pd_list, ignore_index=True)
+
+    # 3 bis time decorrelation
+    if ("time_decorrelation" in corrections) or ("all" in corrections):
+        baseline_pd = decorrelate_time(baseline_pd)
 
     # Clean
     raw_pd["time"] = raw_pd["time"].astype("datetime64[ns]")
