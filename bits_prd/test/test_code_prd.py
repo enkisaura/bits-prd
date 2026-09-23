@@ -7,6 +7,7 @@ Usage: Used from pytest
 ======
     python -m pytest -v
 """
+from cProfile import label
 
 import pandas as pd
 import numpy as np
@@ -15,8 +16,9 @@ from bits.src.utils import get_example_data_filepath, fast_parse
 
 from bits_prd.src import code_prd
 
-uncertainty = 12
-speed_uncertainty = 1
+uncertainty = 1
+speed_uncertainty = 0.1
+accurate_start_time = np.datetime64("2023-09-14T12:02:38", "ns")
 
 # Parse data
 raw_rx1_pd = fast_parse(get_example_data_filepath("raw", rover_type="fixed")[0], parse.raw.rinex)
@@ -24,6 +26,9 @@ raw_rx2_pd = fast_parse(get_example_data_filepath("raw", rover_type="circular")[
 rx1_nmea_pd = fast_parse(get_example_data_filepath("pvt", rover_type="fixed")[0], parse.pvt.rmc)
 rx2_nmea_pd = fast_parse(get_example_data_filepath("pvt", rover_type="circular")[0], parse.pvt.rmc)
 ephemeris_df = fast_parse(get_example_data_filepath("ephemeris", rover_type="fixed")[0], parse.ephemeris.rinex)
+
+ephemeris_df = ephemeris_df[~((ephemeris_df["gnss_id"] == "gal") & (ephemeris_df["time"] > np.datetime64("2023-09-14T12:00", "ns")))]
+
 
 # Get ground truth
 gt_pd = pd.merge_asof(
@@ -48,10 +53,17 @@ def test_sd(verbose=False):
 def test_dd(verbose=False):
     prd(compute_dd=True, verbose=verbose)
 
-def prd(compute_dd:bool, verbose=False):
-    baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=compute_dd,
-    ephemeris_pd=ephemeris_df, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd)
+def test_sd_horizontal(verbose=False):
+    prd(compute_dd=False, verbose=verbose, horizontal=True)
 
+def test_dd_horizontal(verbose=False):
+    prd(compute_dd=True, verbose=verbose, horizontal=True)
+
+def prd(compute_dd:bool, horizontal:bool=False, verbose=False):
+    baseline_pd, raw_pd = code_prd.compute_baseline(rx_obs_pd=raw_rx1_pd, rx2_obs_pd=raw_rx2_pd, compute_dd=compute_dd,
+    ephemeris_pd=ephemeris_df, pos_pd_rx1=rx1_nmea_pd, pos_pd_rx2=rx2_nmea_pd, horizontal=horizontal)
+
+    baseline_pd = baseline_pd[baseline_pd["time"] > accurate_start_time]
     # Get error
     baseline_pd = pd.merge_asof(
         baseline_pd, gt_pd,
@@ -76,3 +88,5 @@ def prd(compute_dd:bool, verbose=False):
 if __name__ == '__main__':
     test_sd(verbose=True)
     test_dd(verbose=True)
+    test_sd_horizontal(verbose=True)
+    test_dd_horizontal(verbose=True)

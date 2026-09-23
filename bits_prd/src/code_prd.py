@@ -103,7 +103,11 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
                 local_dd_pd["sd_rate1"] = local_dd_pd["sd_rate"].iloc[0]
             local_dd_pd["e_x_sv1"] = local_dd_pd["e_x_rx1"].iloc[0]
             local_dd_pd["e_y_sv1"] = local_dd_pd["e_y_rx1"].iloc[0]
-            local_dd_pd["e_z_sv1"] = local_dd_pd["e_z_rx1"].iloc[0]
+            if "e_z_rx1" in local_dd_pd.columns:
+                two_d = False
+                local_dd_pd["e_z_sv1"] = local_dd_pd["e_z_rx1"].iloc[0]
+            else:
+                two_d = True
             local_dd_pd = local_dd_pd[1:]
 
             at_timestamp_pd_list.append(local_dd_pd)
@@ -119,10 +123,11 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     # Rename second SV as "_sv2"
     out_pd.rename(columns={"sv_id": "sv_id2", "prn_id": "prn_id2", "sd": "sd2",
                            "e_x_rx1": "e_x_sv2",
-                           "e_y_rx1": "e_y_sv2",
-                           "e_z_rx1": "e_z_sv2"}, inplace=True)
+                           "e_y_rx1": "e_y_sv2"}, inplace=True)
     if sd_rate:
         out_pd.rename(columns={"sd_rate": "sd_rate2"}, inplace=True)
+    if not two_d:
+        out_pd.rename(columns={"e_z_rx1": "e_z_sv2"}, inplace=True)
 
     # Compute DD
     out_pd["dd"] = out_pd["sd1"] - out_pd["sd2"]
@@ -132,7 +137,8 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     # Add differenced steering vectors
     out_pd["delta_e_x"] = (out_pd["e_x_sv1"] - out_pd["e_x_sv2"])
     out_pd["delta_e_y"] = (out_pd["e_y_sv1"] - out_pd["e_y_sv2"])
-    out_pd["delta_e_z"] = (out_pd["e_z_sv1"] - out_pd["e_z_sv2"])
+    if not two_d:
+        out_pd["delta_e_z"] = (out_pd["e_z_sv1"] - out_pd["e_z_sv2"])
 
     # Clean up
     out_pd = out_pd.sort_values(by=["time", "sv_id1", "sv_id2"]).reset_index(drop=True)
@@ -174,7 +180,7 @@ def decorrelate_time(baseline_df: pd.DataFrame) -> pd.DataFrame:
     :param baseline_df:
     :return:
     """
-    if not np.isin(["vbx_rx_mps", "vby_rx_mps", "vbz_rx_mps", "vbaseline_mps"], baseline_df.columns).all():
+    if not np.isin(["vbx_rx_mps", "vby_rx_mps", "vbaseline_mps"], baseline_df.columns).all():
         warnings.warn("No baseline rate estimate found, cannot decorrelate time.")
     # Estimate receivers offset
     if "bb_rx_m" in baseline_df.columns:
@@ -185,14 +191,16 @@ def decorrelate_time(baseline_df: pd.DataFrame) -> pd.DataFrame:
         warnings.warn("No between receivers time bias found, cannot decorrelate time.")
         return baseline_df
 
-    baseline_df.rename(columns={"bx_rx_m": "raw_bx_rx_m", "by_rx_m": "raw_by_rx_m", "bz_rx_m": "raw_bz_rx_m",
-                                "bb_rx_m": "raw_bb_rx_m", "baseline_m": "raw_baseline_m", "time": "raw_time"}, inplace=True)
+    baseline_df.rename(columns={"bx_rx_m": "raw_bx_rx_m", "by_rx_m": "raw_by_rx_m", "bb_rx_m": "raw_bb_rx_m",
+                                "baseline_m": "raw_baseline_m", "time": "raw_time"}, inplace=True)
 
     offset = pd.to_timedelta(np.nan_to_num(0.5 * dt, nan=0.0), unit="s")
     baseline_df["time"] = baseline_df["raw_time"] + offset
     baseline_df["bx_rx_m"] = baseline_df["raw_bx_rx_m"] + 0.5 * dt * baseline_df["vbx_rx_mps"]
     baseline_df["by_rx_m"] = baseline_df["raw_by_rx_m"] + 0.5 * dt * baseline_df["vby_rx_mps"]
-    baseline_df["bz_rx_m"] = baseline_df["raw_bz_rx_m"] + 0.5 * dt * baseline_df["vbz_rx_mps"]
+    if "bz_rx_m" in baseline_df.columns:
+        baseline_df.rename(columns={"bz_rx_m": "raw_bz_rx_m"}, inplace=True)
+        baseline_df["bz_rx_m"] = baseline_df["raw_bz_rx_m"] + 0.5 * dt * baseline_df["vbz_rx_mps"]
     baseline_df["raw_bb_rx_m"] = 0
     baseline_df["baseline_m"] = baseline_df["raw_baseline_m"] + 0.5 * dt * baseline_df["vbaseline_mps"]
 
@@ -200,7 +208,7 @@ def decorrelate_time(baseline_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = None, weights_column:str="weight",
-                     time_between_meas:float = 1, compute_dd:None|bool=None, pivot_sv_id:str | None = None,
+                     time_between_meas:float = 1, compute_dd:None|bool=None, horizontal:bool=False, pivot_sv_id:str | None = None,
                      ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
                      pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None,
                      corrections:List[Literal["space_decorrelation", "time_decorrelation", "all"]] = ["all"]) \
@@ -240,18 +248,37 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
 
     # 1 Compute steering vectors
     if "e_x" not in rx_obs_pd.columns or "e_x_rx1" not in rx_obs_pd.columns:
-        rx_obs_pd = compute_geometry_matrix(rx_obs_pd, ephemeris_pd=ephemeris_pd,
+        pos_pd_rx1, rx_obs_pd = compute_geometry_matrix(rx_obs_pd, ephemeris_pd=ephemeris_pd,
                                             ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx1)
 
     if rx2_obs_pd is not None:
         if "e_x" not in rx2_obs_pd.columns:
-            rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
-                                                 ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2).dropna()
+            pos_pd_rx2, rx2_obs_pd = compute_geometry_matrix(rx2_obs_pd, ephemeris_pd=ephemeris_pd,
+                                                 ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx2)
 
     # 1 bis space decorrelation
     if ("space_decorrelation" in corrections) or ("all" in corrections):
         rx_obs_pd = decorrelate_space(rx_obs_pd)
         rx2_obs_pd = decorrelate_space(rx2_obs_pd)
+
+    # 1 ter convert geometry matrix to ENU for horizontal baseline
+    if horizontal:
+        approx_pos = pos_pd_rx1[["x_rx_m", "y_rx_m", "z_rx_m"]].dropna().iloc[0]
+        enu_rx1 = bits.convert.space.ecef_to_enu(rx_obs_pd["e_x"], rx_obs_pd["e_y"], rx_obs_pd["e_z"],
+                                                 approx_pos["x_rx_m"], approx_pos["y_rx_m"], approx_pos["z_rx_m"],
+                                                 with_translation=False)
+
+        rx_obs_pd["e_x"] = enu_rx1[0]
+        rx_obs_pd["e_y"] = enu_rx1[1]
+        rx_obs_pd.drop(["e_z"], axis=1, inplace=True)
+
+        if rx2_obs_pd is not None:
+            enu_rx2 = bits.convert.space.ecef_to_enu(rx2_obs_pd["e_x"], rx2_obs_pd["e_y"], rx2_obs_pd["e_z"],
+                                                     approx_pos["x_rx_m"], approx_pos["y_rx_m"], approx_pos["z_rx_m"],
+                                                     with_translation=False)
+            rx2_obs_pd["e_x"] = enu_rx2[0]
+            rx2_obs_pd["e_y"] = enu_rx2[1]
+            rx2_obs_pd.drop(["e_z"], axis=1, inplace=True)
 
     # 2 Compute Single/Double differences
     if rx2_obs_pd is not None:
@@ -272,13 +299,17 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     raw_pd = pd.concat(raw_pd_list, ignore_index=True)
     baseline_pd = pd.concat(baseline_pd_list, ignore_index=True)
 
-    # 3 bis time decorrelation
-    if ("time_decorrelation" in corrections) or ("all" in corrections):
-        baseline_pd = decorrelate_time(baseline_pd)
-
     # Clean
     raw_pd["time"] = raw_pd["time"].astype("datetime64[ns]")
     baseline_pd["time"] = baseline_pd["time"].astype("datetime64[ns]")
+    if "time_rx2" in raw_pd.columns:
+        raw_pd["time_rx2"] = raw_pd["time_rx2"].astype("datetime64[ns]")
+    if "time_rx2" in baseline_pd.columns:
+        baseline_pd["time_rx2"] = baseline_pd["time_rx2"].astype("datetime64[ns]")
+
+    # 3 bis time decorrelation
+    if ("time_decorrelation" in corrections) or ("all" in corrections):
+        baseline_pd = decorrelate_time(baseline_pd)
 
     return baseline_pd, raw_pd
 
@@ -292,6 +323,7 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
     :param weights_column: Name of the column containing the weights if any
     :return: BITS raw like dataframe, BITS PVT like Serie with baseline estimate
     """
+    two_d = False
     # Build measurement matrix
     Y = group[mode].to_numpy().reshape(-1, 1)
 
@@ -299,15 +331,21 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
     if mode == "sd":
         ex = group["e_x_rx1"].to_numpy()
         ey = group["e_y_rx1"].to_numpy()
-        ez = group["e_z_rx1"].to_numpy()
-
-        G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose() # Add a ones column for inter-rx clock bias
+        if "e_z_rx1" in group:
+            ez = group["e_z_rx1"].to_numpy()
+            G = np.vstack((ex, ey, ez, np.ones_like(ex))).transpose() # Add a ones column for inter-rx clock bias
+        else:
+            two_d = True
+            G = np.vstack((ex, ey, np.ones_like(ex))).transpose()  # Add a ones column for inter-rx clock bias
     else:
         ex = group["delta_e_x"].to_numpy()
         ey = group["delta_e_y"].to_numpy()
-        ez = group["delta_e_z"].to_numpy()
-
-        G = np.vstack((ex, ey, ez)).transpose()
+        if "delta_e_z" in group:
+            ez = group["delta_e_z"].to_numpy()
+            G = np.vstack((ex, ey, ez)).transpose()
+        else:
+            two_d = True
+            G = np.vstack((ex, ey)).transpose()
 
     # Build weight matrix
     if weights_column in group.columns:
@@ -325,6 +363,9 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
     # Save the result
     baseline_serie = pd.Series({"time": group["time"].iloc[0],
                                 "mode": mode,})
+    if "time_rx2" in group.columns:
+        baseline_serie["time_rx2"] = group["time_rx2"].iloc[0]
+
     if result is not None:
         estimate, covariance, dop, residuals = result
 
@@ -332,22 +373,28 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
 
         baseline_serie["bx_rx_m"] = float(estimate[0][0])
         baseline_serie["by_rx_m"] = float(estimate[1][0])
-        baseline_serie["bz_rx_m"] = float(estimate[2][0])
+        if not two_d:
+            baseline_serie["bz_rx_m"] = float(estimate[2][0])
         if mode == "sd":
-            baseline_serie["bb_rx_m"] = float(estimate[3][0])
-        baseline_serie["baseline_m"] = float(np.linalg.norm(estimate[:3]))
+            baseline_serie["bb_rx_m"] = float(estimate[-1][0])
+        if two_d:
+            baseline_serie["baseline_m"] = float(np.linalg.norm(estimate[:2]))
+        else:
+            baseline_serie["baseline_m"] = float(np.linalg.norm(estimate[:3]))
 
         baseline_serie["cov_xx_rx_m"] = float(covariance[0][0])
         baseline_serie["cov_yx_rx_m"] = float(covariance[0][1])
-        baseline_serie["cov_zx_rx_m"] = float(covariance[0][2])
         baseline_serie["cov_yy_rx_m"] = float(covariance[1][1])
-        baseline_serie["cov_zy_rx_m"] = float(covariance[1][2])
-        baseline_serie["cov_zz_rx_m"] = float(covariance[2][2])
+        if not two_d:
+            baseline_serie["cov_zx_rx_m"] = float(covariance[0][2])
+            baseline_serie["cov_zy_rx_m"] = float(covariance[1][2])
+            baseline_serie["cov_zz_rx_m"] = float(covariance[2][2])
         if mode == "sd":
-            baseline_serie["cov_bx_rx_m"] = float(covariance[0][3])
-            baseline_serie["cov_by_rx_m"] = float(covariance[1][3])
-            baseline_serie["cov_bz_rx_m"] = float(covariance[2][3])
-            baseline_serie["cov_bb_rx_m"] = float(covariance[3][3])
+            baseline_serie["cov_bx_rx_m"] = float(covariance[0][-1])
+            baseline_serie["cov_by_rx_m"] = float(covariance[1][-1])
+            if not two_d:
+                baseline_serie["cov_bz_rx_m"] = float(covariance[2][3])
+            baseline_serie["cov_bb_rx_m"] = float(covariance[-1][-1])
 
         baseline_serie["DOP"] = float(dop)
     else:
@@ -355,21 +402,24 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
 
         baseline_serie["bx_rx_m"] = None
         baseline_serie["by_rx_m"] = None
-        baseline_serie["bz_rx_m"] = None
+        if not two_d:
+            baseline_serie["bz_rx_m"] = None
         if mode == "sd":
             baseline_serie["bb_rx_m"] = None
         baseline_serie["baseline_m"] = None
 
         baseline_serie["cov_xx_rx_m"] = None
         baseline_serie["cov_yx_rx_m"] = None
-        baseline_serie["cov_zx_rx_m"] = None
         baseline_serie["cov_yy_rx_m"] = None
-        baseline_serie["cov_zy_rx_m"] = None
-        baseline_serie["cov_zz_rx_m"] = None
+        if not two_d:
+            baseline_serie["cov_zx_rx_m"] = None
+            baseline_serie["cov_zy_rx_m"] = None
+            baseline_serie["cov_zz_rx_m"] = None
         if mode == "sd":
             baseline_serie["cov_bx_rx_m"] = None
             baseline_serie["cov_by_rx_m"] = None
-            baseline_serie["cov_bz_rx_m"] = None
+            if not two_d:
+                baseline_serie["cov_bz_rx_m"] = None
             baseline_serie["cov_bb_rx_m"] = None
 
         baseline_serie["DOP"] = None
@@ -390,43 +440,52 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
 
             baseline_serie["vbx_rx_mps"] = float(v_estimate[0][0])
             baseline_serie["vby_rx_mps"] = float(v_estimate[1][0])
-            baseline_serie["vbz_rx_mps"] = float(v_estimate[2][0])
+            if not two_d:
+                baseline_serie["vbz_rx_mps"] = float(v_estimate[2][0])
             if mode == "sd":
-                baseline_serie["vbb_rx_mps"] = float(v_estimate[3][0])
-            baseline_serie["vbaseline_mps"] = float(np.linalg.norm(v_estimate[:3]))
+                baseline_serie["vbb_rx_mps"] = float(v_estimate[-1][0])
+            if two_d:
+                baseline_serie["vbaseline_mps"] = float(np.linalg.norm(v_estimate[:2]))
+            else:
+                baseline_serie["vbaseline_mps"] = float(np.linalg.norm(v_estimate[:3]))
 
             baseline_serie["cov_vxvx_rx_mps"] = float(v_covariance[0][0])
             baseline_serie["cov_vyvx_rx_mps"] = float(v_covariance[0][1])
-            baseline_serie["cov_vzvx_rx_mps"] = float(v_covariance[0][2])
             baseline_serie["cov_vyvy_rx_mps"] = float(v_covariance[1][1])
-            baseline_serie["cov_vzvy_rx_mps"] = float(v_covariance[1][2])
-            baseline_serie["cov_vzvz_rx_mps"] = float(v_covariance[2][2])
+            if not two_d:
+                baseline_serie["cov_vzvx_rx_mps"] = float(v_covariance[0][2])
+                baseline_serie["cov_vzvy_rx_mps"] = float(v_covariance[1][2])
+                baseline_serie["cov_vzvz_rx_mps"] = float(v_covariance[2][2])
             if mode == "sd":
-                baseline_serie["cov_vbvx_rx_mps"] = float(v_covariance[0][3])
-                baseline_serie["cov_vbvy_rx_mps"] = float(v_covariance[1][3])
-                baseline_serie["cov_vbvz_rx_mps"] = float(v_covariance[2][3])
-                baseline_serie["cov_vbvb_rx_mps"] = float(v_covariance[3][3])
+                baseline_serie["cov_vbvx_rx_mps"] = float(v_covariance[0][-1])
+                baseline_serie["cov_vbvy_rx_mps"] = float(v_covariance[1][-1])
+                if not two_d:
+                    baseline_serie["cov_vbvz_rx_mps"] = float(v_covariance[2][-1])
+                baseline_serie["cov_vbvb_rx_mps"] = float(v_covariance[-1][-1])
 
         else:
             group["vresiduals_mps"] = None
 
             baseline_serie["vbx_rx_mps"] = None
             baseline_serie["vby_rx_mps"] = None
-            baseline_serie["vbz_rx_mps"] = None
+            if two_d:
+                baseline_serie["vbz_rx_mps"] = None
             if mode == "sd":
                 baseline_serie["vbb_rx_mps"] = None
             baseline_serie["vbaseline_mps"] = None
 
             baseline_serie["cov_vxvx_rx_mps"] = None
             baseline_serie["cov_vyvx_rx_mps"] = None
-            baseline_serie["cov_vzvx_rx_mps"] = None
             baseline_serie["cov_vyvy_rx_mps"] = None
-            baseline_serie["cov_vzvy_rx_mps"] = None
-            baseline_serie["cov_vzvz_rx_mps"] = None
+            if not two_d:
+                baseline_serie["cov_vzvx_rx_mps"] = None
+                baseline_serie["cov_vzvy_rx_mps"] = None
+                baseline_serie["cov_vzvz_rx_mps"] = None
             if mode == "sd":
                 baseline_serie["cov_vbvx_rx_mps"] = None
                 baseline_serie["cov_vbvy_rx_mps"] = None
-                baseline_serie["cov_vbvz_rx_mps"] = None
+                if not two_d:
+                    baseline_serie["cov_vbvz_rx_mps"] = None
                 baseline_serie["cov_vbvb_rx_mps"] = None
 
 

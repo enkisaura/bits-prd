@@ -2,10 +2,12 @@ import bits # Available at https://github.com/enkisaura/Baguette-In-The-Sky.git
 
 import numpy as np
 import pandas as pd
+from typing import Tuple
+
 
 def compute_geometry_matrix(raw_pd: pd.DataFrame,
                             ephemeris_pd: pd.DataFrame|None=None, ephemeris_filepath: str|None=None,
-                            pos_pd:pd.DataFrame|None=None) -> pd.DataFrame:
+                            pos_pd:pd.DataFrame|None=None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Computes the geometry matrix from raw data and ephemeris data.
 
@@ -19,15 +21,16 @@ def compute_geometry_matrix(raw_pd: pd.DataFrame,
     :return: BITS raw dataframe with geometry matrix
     """
     if pos_pd is None:
-        out_pd = slow_sv_pos(raw_pd, ephemeris_pd, ephemeris_filepath) # Also computes approximate position
+        pos_pd, pd_gnss_raw = slow_sv_pos(raw_pd, ephemeris_pd, ephemeris_filepath) # Also computes approximate position
     else:
-        out_pd = fast_sv_pos(raw_pd, pos_pd, ephemeris_pd, ephemeris_filepath)
+        pos_pd, pd_gnss_raw = fast_sv_pos(raw_pd, pos_pd, ephemeris_pd, ephemeris_filepath)
 
-    return out_pd
+    pd_gnss_raw = pd_gnss_raw.dropna(subset=["e_x"])
+    return pos_pd, pd_gnss_raw
 
 
 def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame|None, ephemeris_filepath:str|None) \
-        -> pd.DataFrame:
+        -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Computes satellites and receiver positions without a priori knowledge on receiver position.
 
@@ -46,11 +49,11 @@ def slow_sv_pos(raw_pd: pd.DataFrame, ephemeris_pd:pd.DataFrame|None, ephemeris_
     pos_pd.sort_values("time", inplace=True)
     pd_gnss_raw.sort_values("time", inplace=True)
 
-    return pd_gnss_raw
+    return pos_pd, pd_gnss_raw
 
 
 def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.DataFrame|None,
-                ephemeris_filepath:str|None) -> pd.DataFrame:
+                ephemeris_filepath:str|None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Computes satellites positions with a priori knowledge on receiver position.
 
@@ -89,4 +92,4 @@ def fast_sv_pos(raw_pd: pd.DataFrame, pos_pd:pd.DataFrame, ephemeris_pd: pd.Data
 
     pd_gnss_raw = pd.concat(raw_pd_list, ignore_index=True)
 
-    return pd_gnss_raw
+    return pos_pd, pd_gnss_raw
