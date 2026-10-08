@@ -9,7 +9,7 @@ from bits_prd.src.steering_vectors import compute_geometry_matrix
 
 
 def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_meas:float=1, compute_dd=True,
-            pivot_sv_id:str|None=None) -> pd.DataFrame:
+            pivot_sv_id:str|None=None, meas_col_name:str="pr_m") -> pd.DataFrame:
     """
     Computes single and double differences. This functions merges rx1_obs_pd with rx2_obs_pd and adds pseudorange
     differences. In the returned dataframe, rx1_obs_pd data is noted "_rx1" and rx2_obs_pd "_rx2".
@@ -19,10 +19,11 @@ def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_mea
     :param time_between_meas: Maximum allowed time between measurements
     :param compute_dd: set to True to compute SD + DD, False for SD only
     :param pivot_sv_id: name of the pivot SV; set to None for no pivot
+    :param meas_col_name: name of the SV measurement column (pseudorange or carrier phase)
     :return: BITS raw dataframe like with sd and/or dd
     """
     # Compute single differences
-    out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=time_between_meas/2)
+    out_pd = get_single_difference(rx1_obs_pd, rx2_obs_pd, dt_tolerance=time_between_meas/2, meas_col_name=meas_col_name)
 
     # Compute double differences if applicable
     if compute_dd:
@@ -36,13 +37,14 @@ def get_prd(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame, time_between_mea
 
 
 def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
-                          dt_tolerance: float = 0.5) -> pd.DataFrame:
+                          dt_tolerance: float = 0.5, corrections: List[str]=["all"], meas_col_name:str="pr_m") -> pd.DataFrame:
     """
     Computes single difference. In the returned dataframe, rx1_obs_pd data is noted "_rx1" and rx2_obs_pd "_rx2".
 
     :param rx1_obs_pd: BITS raw dataframe
     :param rx2_obs_pd: BITS raw dataframe
     :param dt_tolerance: Maximum time between measurements of rx1 and rx2 to be considered at same timestamp
+    :param meas_col_name: name of the SV measurement column (pseudorange or carrier phase)
     :return: BITS raw dataframe like with sd
     """
     # 0 Clean up
@@ -60,8 +62,11 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
         suffixes=("_rx1", "_rx2")
     )
 
+    if "static_time_decorrelation" in corrections:
+        out_pd = decorrelate_time_static(out_pd)
+
     # 2 Compute single differences
-    out_pd["sd"] = out_pd["pr_m_rx1"] - out_pd["pr_m_rx2"]
+    out_pd["sd"] = out_pd[f"{meas_col_name}_rx1"] - out_pd[f"{meas_col_name}_rx2"]
     if ("pr_rate_mps_rx1" in out_pd.columns) and ("pr_rate_mps_rx2" in out_pd.columns):
         out_pd["sd_rate"] = out_pd["pr_rate_mps_rx1"] - out_pd["pr_rate_mps_rx2"]
 
@@ -101,8 +106,10 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
             if sd_rate:
                 local_dd_pd["sd_rate1"] = local_dd_pd["sd_rate"].iloc[0]
-            local_dd_pd["e_x_sv1"] = local_dd_pd["e_x_rx1"].iloc[0]
-            local_dd_pd["e_y_sv1"] = local_dd_pd["e_y_rx1"].iloc[0]
+            if "e_x_rx1" in local_dd_pd.columns:
+                local_dd_pd["e_x_sv1"] = local_dd_pd["e_x_rx1"].iloc[0]
+            if "e_y_rx1" in local_dd_pd.columns:
+                local_dd_pd["e_y_sv1"] = local_dd_pd["e_y_rx1"].iloc[0]
             if "e_z_rx1" in local_dd_pd.columns:
                 two_d = False
                 local_dd_pd["e_z_sv1"] = local_dd_pd["e_z_rx1"].iloc[0]
@@ -135,8 +142,10 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
         out_pd["dd_rate"] = out_pd["sd_rate1"] - out_pd["sd_rate2"]
 
     # Add differenced steering vectors
-    out_pd["delta_e_x"] = (out_pd["e_x_sv1"] - out_pd["e_x_sv2"])
-    out_pd["delta_e_y"] = (out_pd["e_y_sv1"] - out_pd["e_y_sv2"])
+    if "e_x_sv1" in out_pd.columns and "e_x_sv2" in out_pd.columns:
+        out_pd["delta_e_x"] = (out_pd["e_x_sv1"] - out_pd["e_x_sv2"])
+    if "e_y_sv1" in out_pd.columns and "e_y_sv2" in out_pd.columns:
+        out_pd["delta_e_y"] = (out_pd["e_y_sv1"] - out_pd["e_y_sv2"])
     if not two_d:
         out_pd["delta_e_z"] = (out_pd["e_z_sv1"] - out_pd["e_z_sv2"])
 
@@ -157,6 +166,7 @@ def decorrelate_space(obs_df: pd.DataFrame) -> pd.DataFrame:
     """
     if not np.isin(["pr_rate_mps", "e_x", "e_y", "e_z", "vx_sv_mps", "vy_sv_mps", "vz_sv_mps"], obs_df.columns).all():
         warnings.warn("Need pseudorange rate, steering vectors and satellite speed to decorrelate space.")
+        return obs_df
 
     obs_df.rename(columns={"pr_rate_mps": "raw_pr_rate_mps"}, inplace=True)
 
@@ -165,6 +175,36 @@ def decorrelate_space(obs_df: pd.DataFrame) -> pd.DataFrame:
     G = np.vstack((obs_df["e_x"], obs_df["e_y"], obs_df["e_z"]))
 
     obs_df["pr_rate_mps"] = pr_rate + np.sum(X_dot * G, axis=0)
+
+    return obs_df
+
+
+def decorrelate_time_static(obs_df: pd.DataFrame) -> pd.DataFrame:
+    """
+
+    :param obs_df: BITS raw dataframe with pseudorange, pseudorange rate and time
+    :return: BITS raw dataframe with corrected "pr_rate_mps"
+    """
+    for rx in ["rx1", "rx2"]:
+        if not np.isin([f"pr_m_{rx}", f"pr_rate_mps_{rx}"], obs_df.columns).all():
+            warnings.warn("Need pseudorange and pseudorange rate to decorrelate time.")
+            return obs_df
+
+    obs_df.rename(columns={f"pr_m_rx2": f"raw_pr_m_rx2"}, inplace=True)
+
+    # Estimate receivers offset
+    if "bb_rx_m" in obs_df.columns:
+        dt = np.asarray(obs_df["bb_rx_m"] / bits.const.C, dtype=np.float64)
+    elif "time_rx2" in obs_df.columns:
+        dt = np.asarray((obs_df["time"] - obs_df["time_rx2"]) / np.timedelta64(1, "s"), dtype=np.float64)
+    else:
+        warnings.warn("No between receivers time bias found, cannot decorrelate time.")
+        return obs_df
+
+    pr_rate = obs_df["pr_rate_mps_rx2"].to_numpy()
+    pr = obs_df["raw_pr_m_rx2"].to_numpy()
+
+    obs_df["pr_m_rx2"] = pr + pr_rate * dt
 
     return obs_df
 
@@ -201,7 +241,7 @@ def decorrelate_time(baseline_df: pd.DataFrame) -> pd.DataFrame:
     if "bz_rx_m" in baseline_df.columns:
         baseline_df.rename(columns={"bz_rx_m": "raw_bz_rx_m"}, inplace=True)
         baseline_df["bz_rx_m"] = baseline_df["raw_bz_rx_m"] + 0.5 * dt * baseline_df["vbz_rx_mps"]
-    baseline_df["raw_bb_rx_m"] = 0
+    baseline_df["bb_rx_m"] = 0
     baseline_df["baseline_m"] = baseline_df["raw_baseline_m"] + 0.5 * dt * baseline_df["vbaseline_mps"]
 
     return baseline_df
@@ -211,7 +251,7 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
                      time_between_meas:float = 1, compute_dd:None|bool=None, horizontal:bool=False, pivot_sv_id:str | None = None,
                      ephemeris_pd: pd.DataFrame | None = None, ephemeris_filepath: str | None = None,
                      pos_pd_rx1:pd.DataFrame | None = None, pos_pd_rx2:pd.DataFrame | None = None,
-                     corrections:List[Literal["space_decorrelation", "time_decorrelation", "all"]] = ["all"]) \
+                     corrections:List[Literal["space_decorrelation", "time_decorrelation", "static_time_decorrelation", "all"]] = ["all"]) \
         -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Compute baseline with SD or DD. This function is not able to compute SD and DD at the same time.
@@ -229,6 +269,9 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
     :param corrections: Corrections to be applied ("space_decorrelation", "time_decorrelation", "all"), defaults to all
     :return: BITS PVT like dataframe with baseline estimate, BITS raw like dataframe
     """
+    rx_obs_pd = rx_obs_pd.copy()
+    if rx2_obs_pd is not None:
+        rx2_obs_pd = rx2_obs_pd.copy()
     # 0 determine mode (SD/DD); Default = DD
     if "dd" in rx_obs_pd.columns:
         mode = "dd"
