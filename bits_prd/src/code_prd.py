@@ -102,6 +102,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
             local_dd_pd = group[i:].copy()
             local_dd_pd["sv_id1"] = local_dd_pd["sv_id"].iloc[0]
             local_dd_pd["prn_id1"] = local_dd_pd["prn_id_rx1"].iloc[0]
+            local_dd_pd["gnss_id1"] = local_dd_pd["gnss_id_rx1"].iloc[0]
             # Store data from local pivot SV as "_sv1"
             local_dd_pd["sd1"] = local_dd_pd["sd"].iloc[0]
             if sd_rate:
@@ -128,7 +129,7 @@ def get_double_difference_no_pivot(sd_obs_pd: pd.DataFrame) -> pd.DataFrame:
     out_pd = pd.concat(out_pd_list, ignore_index=True)
 
     # Rename second SV as "_sv2"
-    out_pd.rename(columns={"sv_id": "sv_id2", "prn_id": "prn_id2", "sd": "sd2",
+    out_pd.rename(columns={"sv_id": "sv_id2", "prn_id_rx1": "prn_id2", "gnss_id_rx1": "gnss_id2" , "sd": "sd2",
                            "e_x_rx1": "e_x_sv2",
                            "e_y_rx1": "e_y_sv2"}, inplace=True)
     if sd_rate:
