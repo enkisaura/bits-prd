@@ -71,7 +71,9 @@ def get_single_difference(rx1_obs_pd: pd.DataFrame, rx2_obs_pd: pd.DataFrame,
         out_pd["sd_rate"] = out_pd["pr_rate_mps_rx1"] - out_pd["pr_rate_mps_rx2"]
 
     # Clean up
-    out_pd.dropna(subset=["sd", "sd_rate"], inplace=True) # Drops non common satellites
+    out_pd.dropna(subset=["sd"], inplace=True) # Drops non common satellites
+    if "sd_rate" in out_pd.columns:
+        out_pd.dropna(subset=["sd_rate"], inplace=True)  # Drops non common satellites
     out_pd = out_pd.sort_values(by=["time", "sv_id"]).reset_index(drop=True)
 
     return out_pd
@@ -286,12 +288,16 @@ def compute_baseline(rx_obs_pd: pd.DataFrame, rx2_obs_pd: None|pd.DataFrame = No
         mode = "dd"
         compute_dd = True
 
-    if rx2_obs_pd is None and ("sd" not in rx_obs_pd.columns or "dd" not in rx_obs_pd.columns):
+    if rx2_obs_pd is None and not ("sd" in rx_obs_pd.columns or "dd" in rx_obs_pd.columns):
         raise ValueError("No pseudorange differences found in Dataframe. Please provide pseudoranges from a second "
                          "receiver in argument rx2_obs_pd.")
 
     # 1 Compute steering vectors
-    if "e_x" not in rx_obs_pd.columns or "e_x_rx1" not in rx_obs_pd.columns:
+    if mode == "sd":
+        valid_g = "e_x" in rx_obs_pd.columns or "e_x_rx1" in rx_obs_pd.columns
+    else:
+        valid_g = "delta_e_x" in rx_obs_pd.columns
+    if not valid_g:
         pos_pd_rx1, rx_obs_pd = compute_geometry_matrix(rx_obs_pd, ephemeris_pd=ephemeris_pd,
                                             ephemeris_filepath=ephemeris_filepath, pos_pd=pos_pd_rx1)
 
