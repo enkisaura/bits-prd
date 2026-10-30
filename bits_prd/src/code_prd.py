@@ -442,31 +442,31 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
 
         baseline_serie["DOP"] = float(dop)
     else:
-        group["residuals_m"] = None
+        group["residuals_m"] = np.nan
 
-        baseline_serie["bx_rx_m"] = None
-        baseline_serie["by_rx_m"] = None
+        baseline_serie["bx_rx_m"] = np.nan
+        baseline_serie["by_rx_m"] = np.nan
         if not two_d:
-            baseline_serie["bz_rx_m"] = None
+            baseline_serie["bz_rx_m"] = np.nan
         if mode == "sd":
-            baseline_serie["bb_rx_m"] = None
-        baseline_serie["baseline_m"] = None
+            baseline_serie["bb_rx_m"] = np.nan
+        baseline_serie["baseline_m"] = np.nan
 
-        baseline_serie["cov_xx_rx_m"] = None
-        baseline_serie["cov_yx_rx_m"] = None
-        baseline_serie["cov_yy_rx_m"] = None
+        baseline_serie["cov_xx_rx_m"] = np.nan
+        baseline_serie["cov_yx_rx_m"] = np.nan
+        baseline_serie["cov_yy_rx_m"] = np.nan
         if not two_d:
-            baseline_serie["cov_zx_rx_m"] = None
-            baseline_serie["cov_zy_rx_m"] = None
-            baseline_serie["cov_zz_rx_m"] = None
+            baseline_serie["cov_zx_rx_m"] = np.nan
+            baseline_serie["cov_zy_rx_m"] = np.nan
+            baseline_serie["cov_zz_rx_m"] = np.nan
         if mode == "sd":
-            baseline_serie["cov_bx_rx_m"] = None
-            baseline_serie["cov_by_rx_m"] = None
+            baseline_serie["cov_bx_rx_m"] = np.nan
+            baseline_serie["cov_by_rx_m"] = np.nan
             if not two_d:
-                baseline_serie["cov_bz_rx_m"] = None
-            baseline_serie["cov_bb_rx_m"] = None
+                baseline_serie["cov_bz_rx_m"] = np.nan
+            baseline_serie["cov_bb_rx_m"] = np.nan
 
-        baseline_serie["DOP"] = None
+        baseline_serie["DOP"] = np.nan
 
     # Compute speed
     if f"{mode}_rate" in group.columns:
@@ -508,29 +508,29 @@ def window_compute_baseline(group: pd.DataFrame, mode:Literal["sd", "dd"]="dd", 
                 baseline_serie["cov_vbvb_rx_mps"] = float(v_covariance[-1][-1])
 
         else:
-            group["vresiduals_mps"] = None
+            group["vresiduals_mps"] = np.nan
 
-            baseline_serie["vbx_rx_mps"] = None
-            baseline_serie["vby_rx_mps"] = None
+            baseline_serie["vbx_rx_mps"] = np.nan
+            baseline_serie["vby_rx_mps"] = np.nan
             if two_d:
-                baseline_serie["vbz_rx_mps"] = None
+                baseline_serie["vbz_rx_mps"] = np.nan
             if mode == "sd":
-                baseline_serie["vbb_rx_mps"] = None
-            baseline_serie["vbaseline_mps"] = None
+                baseline_serie["vbb_rx_mps"] = np.nan
+            baseline_serie["vbaseline_mps"] = np.nan
 
-            baseline_serie["cov_vxvx_rx_mps"] = None
-            baseline_serie["cov_vyvx_rx_mps"] = None
-            baseline_serie["cov_vyvy_rx_mps"] = None
+            baseline_serie["cov_vxvx_rx_mps"] = np.nan
+            baseline_serie["cov_vyvx_rx_mps"] = np.nan
+            baseline_serie["cov_vyvy_rx_mps"] = np.nan
             if not two_d:
-                baseline_serie["cov_vzvx_rx_mps"] = None
-                baseline_serie["cov_vzvy_rx_mps"] = None
-                baseline_serie["cov_vzvz_rx_mps"] = None
+                baseline_serie["cov_vzvx_rx_mps"] = np.nan
+                baseline_serie["cov_vzvy_rx_mps"] = np.nan
+                baseline_serie["cov_vzvz_rx_mps"] = np.nan
             if mode == "sd":
-                baseline_serie["cov_vbvx_rx_mps"] = None
-                baseline_serie["cov_vbvy_rx_mps"] = None
+                baseline_serie["cov_vbvx_rx_mps"] = np.nan
+                baseline_serie["cov_vbvy_rx_mps"] = np.nan
                 if not two_d:
-                    baseline_serie["cov_vbvz_rx_mps"] = None
-                baseline_serie["cov_vbvb_rx_mps"] = None
+                    baseline_serie["cov_vbvz_rx_mps"] = np.nan
+                baseline_serie["cov_vbvb_rx_mps"] = np.nan
 
 
     return baseline_serie.to_frame().T, group
