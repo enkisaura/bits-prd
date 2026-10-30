@@ -7,7 +7,6 @@ Usage: Used from pytest
 ======
     python -m pytest -v
 """
-from cProfile import label
 
 import pandas as pd
 import numpy as np
